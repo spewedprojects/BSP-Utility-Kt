@@ -65,9 +65,16 @@ object PreviewData {
         ConfigItem(id = 20L, category = "UNIT", name = "Unit II"),
         ConfigItem(id = 21L, category = "UNIT", name = "Unit III"),
 
+        // Shifts
+        ConfigItem(id = 24L, category = "SHIFT", name = "Shift A"),
+        ConfigItem(id = 25L, category = "SHIFT", name = "Shift B"),
+        ConfigItem(id = 26L, category = "SHIFT", name = "Shift C"),
+        ConfigItem(id = 27L, category = "SHIFT", name = "General"),
+
         // Custom Fields
-        ConfigItem(id = 22L, category = "CUSTOM_FIELD", name = "PF Number", extraType = "TEXT"),
-        ConfigItem(id = 23L, category = "CUSTOM_FIELD", name = "Safety Shoes Issued", extraType = "BOOLEAN")
+        ConfigItem(id = 22L, category = "CUSTOM_FIELD", name = "PF Number", extraType = "TEXT|STAFF"),
+        ConfigItem(id = 23L, category = "CUSTOM_FIELD", name = "Safety Shoes Issued", extraType = "BOOLEAN|LABOUR"),
+        ConfigItem(id = 28L, category = "CUSTOM_FIELD", name = "Aadhaar Verified", extraType = "BOOLEAN|ALL")
     )
 
     val sampleEmployees = listOf(
@@ -81,7 +88,8 @@ object PreviewData {
             permanentDepartment = "Fabrication",
             designation = "Production Supervisor",
             defaultUnit = "Unit I",
-            defaultShift = "Shift A"
+            defaultShift = "Shift A",
+            customFieldsJson = """{"PF Number":"PF-99214","Aadhaar Verified":"true"}"""
         ),
         Employee(
             id = 2L,
@@ -118,7 +126,8 @@ object PreviewData {
             contractorName = "Om Sai Enterprises",
             defaultWorkRole = "Welder",
             defaultUnit = "Unit I",
-            defaultShift = "Shift A"
+            defaultShift = "Shift A",
+            customFieldsJson = """{"Safety Shoes Issued":"true","Aadhaar Verified":"true"}"""
         ),
         Employee(
             id = 5L,

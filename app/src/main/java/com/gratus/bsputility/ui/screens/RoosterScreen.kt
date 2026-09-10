@@ -58,6 +58,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -67,6 +68,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -75,6 +77,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.Contractor
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
@@ -86,6 +89,7 @@ import com.gratus.bsputility.ui.theme.IndustrialAmber600
 import com.gratus.bsputility.ui.theme.IndustrialNavy900
 import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
+import org.json.JSONObject
 
 @Composable
 fun RoosterScreen(
@@ -112,6 +116,13 @@ fun RoosterScreen(
     val units = remember(configItems) {
         configItems.filter { it.category == "UNIT" }.map { it.name }
     }
+    val shifts = remember(configItems) {
+        val list = configItems.filter { it.category == "SHIFT" }.map { it.name }
+        if (list.isEmpty()) listOf("Shift A", "Shift B", "Shift C", "General") else list
+    }
+    val customFields = remember(configItems) {
+        configItems.filter { it.category == "CUSTOM_FIELD" }
+    }
 
     RoosterScreenContent(
         allEmployees = allEmployees,
@@ -120,6 +131,8 @@ fun RoosterScreen(
         roles = roles,
         designations = designations,
         units = units,
+        shifts = shifts,
+        customFields = customFields,
         searchQuery = searchQuery,
         onSearchQueryChange = { viewModel.roosterSearchQuery.value = it },
         filterStatus = filterStatus,
@@ -148,6 +161,8 @@ fun RoosterScreenContent(
     roles: List<String>,
     designations: List<String>,
     units: List<String>,
+    shifts: List<String> = emptyList(),
+    customFields: List<ConfigItem> = emptyList(),
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     filterStatus: String,
@@ -206,37 +221,12 @@ fun RoosterScreenContent(
     val labourList = remember(filteredEmployees) { filteredEmployees.filter { it.type == EmployeeTypes.LABOUR } }
     val hkList = remember(filteredEmployees) { filteredEmployees.filter { it.type == EmployeeTypes.HOUSEKEEPING } }
 
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    isCreatingNew = true
-                    showAddEditDialog = Employee(
-                        name = "",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = "",
-                        permanentDepartment = departments.firstOrNull() ?: "Welding Shop",
-                        contractorId = contractors.firstOrNull()?.id,
-                        contractorName = contractors.firstOrNull()?.name ?: "",
-                        defaultWorkRole = roles.firstOrNull() ?: "Helper",
-                        defaultUnit = units.firstOrNull() ?: "Unit I",
-                        defaultShift = "Shift A"
-                    )
-                },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .testTag("fab_add_employee")
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Employee")
-            }
-        }
-    ) { innerPadding ->
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
         Column(
-            modifier = modifier
+            modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
             // Header Bar with Quick Import & Export actions
@@ -443,10 +433,36 @@ fun RoosterScreenContent(
                     }
 
                     item {
-                        Spacer(modifier = Modifier.height(100.dp))
+                        Spacer(modifier = Modifier.height(80.dp))
                     }
                 }
             }
+        }
+
+        FloatingActionButton(
+            onClick = {
+                isCreatingNew = true
+                showAddEditDialog = Employee(
+                    name = "",
+                    type = EmployeeTypes.LABOUR,
+                    status = EmployeeStatuses.ACTIVE,
+                    dateAdded = "",
+                    permanentDepartment = departments.firstOrNull() ?: "Welding Shop",
+                    contractorId = contractors.firstOrNull()?.id,
+                    contractorName = contractors.firstOrNull()?.name ?: "",
+                    defaultWorkRole = roles.firstOrNull() ?: "Helper",
+                    defaultUnit = units.firstOrNull() ?: "Unit I",
+                    defaultShift = "Shift A"
+                )
+            },
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .testTag("fab_add_employee")
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Add Employee")
         }
     }
 
@@ -460,6 +476,8 @@ fun RoosterScreenContent(
             designations = designations,
             contractors = contractors,
             units = units,
+            shifts = shifts,
+            customFields = customFields,
             onDismiss = { showAddEditDialog = null },
             onSave = { updated ->
                 if (isCreatingNew) {
@@ -606,6 +624,47 @@ fun RoosterEmployeeCard(
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.outline
                 )
+
+                // Custom fields badges
+                val customFieldsMap = remember(employee.customFieldsJson) {
+                    val map = mutableMapOf<String, String>()
+                    try {
+                        if (employee.customFieldsJson.isNotBlank()) {
+                            val json = JSONObject(employee.customFieldsJson)
+                            val keys = json.keys()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                val v = json.optString(k)
+                                if (v.isNotBlank()) {
+                                    map[k] = v
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                    map
+                }
+                if (customFieldsMap.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        customFieldsMap.entries.take(3).forEach { (k, v) ->
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+                            ) {
+                                Text(
+                                    text = if (v.equals("true", ignoreCase = true)) k else "$k: $v",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             Row {
@@ -629,6 +688,8 @@ fun AddEditEmployeeDialog(
     designations: List<String>,
     contractors: List<Contractor>,
     units: List<String>,
+    shifts: List<String> = emptyList(),
+    customFields: List<ConfigItem> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (Employee) -> Unit
 ) {
@@ -648,6 +709,27 @@ fun AddEditEmployeeDialog(
     var roleExp by remember { mutableStateOf(false) }
     var contractorExp by remember { mutableStateOf(false) }
     var unitExp by remember { mutableStateOf(false) }
+    var shiftExp by remember { mutableStateOf(false) }
+
+    val availableShifts = remember(shifts) {
+        if (shifts.isEmpty()) listOf("Shift A", "Shift B", "Shift C", "General") else shifts
+    }
+
+    val initialCustomFields = remember(employee.customFieldsJson) {
+        val map = mutableMapOf<String, String>()
+        try {
+            if (employee.customFieldsJson.isNotBlank()) {
+                val json = JSONObject(employee.customFieldsJson)
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    map[k] = json.optString(k)
+                }
+            }
+        } catch (_: Exception) {}
+        map
+    }
+    var customFieldValues by remember { mutableStateOf(initialCustomFields) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -851,12 +933,35 @@ fun AddEditEmployeeDialog(
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Shift", style = MaterialTheme.typography.labelMedium)
-                            OutlinedTextField(
-                                value = shift,
-                                onValueChange = { shift = it },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { shiftExp = true },
+                                shape = RoundedCornerShape(4.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(shift.ifBlank { availableShifts.firstOrNull() ?: "Shift A" }, fontSize = 13.sp)
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                }
+                                DropdownMenu(expanded = shiftExp, onDismissRequest = { shiftExp = false }) {
+                                    availableShifts.forEach { s ->
+                                        DropdownMenuItem(
+                                            text = { Text(s) },
+                                            onClick = {
+                                                shift = s
+                                                shiftExp = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -868,12 +973,79 @@ fun AddEditEmployeeDialog(
                     label = { Text("Permanent Remarks (Optional)") },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // Custom Fields Section
+                val applicableFields = remember(customFields, type) {
+                    customFields.filter { cf ->
+                        val parts = cf.extraType.split("|")
+                        val target = parts.getOrNull(1)?.uppercase() ?: "ALL"
+                        when (target) {
+                            "STAFF" -> type == EmployeeTypes.STAFF
+                            "LABOUR" -> type != EmployeeTypes.STAFF
+                            else -> true
+                        }
+                    }
+                }
+
+                if (applicableFields.isNotEmpty()) {
+                    Text("Custom Fields", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        applicableFields.forEach { cf ->
+                            val parts = cf.extraType.split("|")
+                            val fieldType = parts.getOrNull(0)?.uppercase() ?: "TEXT"
+                            val currentValue = customFieldValues[cf.name] ?: ""
+
+                            if (fieldType == "BOOLEAN") {
+                                val isChecked = currentValue.equals("true", ignoreCase = true)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(cf.name, fontSize = 13.sp)
+                                    Switch(
+                                        checked = isChecked,
+                                        onCheckedChange = { checked ->
+                                            customFieldValues = customFieldValues.toMutableMap().apply {
+                                                put(cf.name, checked.toString())
+                                            }
+                                        }
+                                    )
+                                }
+                            } else {
+                                OutlinedTextField(
+                                    value = currentValue,
+                                    onValueChange = { newVal ->
+                                        customFieldValues = customFieldValues.toMutableMap().apply {
+                                            put(cf.name, newVal)
+                                        }
+                                    },
+                                    label = { Text(cf.name) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
+                        val jsonObj = JSONObject()
+                        customFieldValues.forEach { (k, v) ->
+                            if (v.isNotBlank()) {
+                                jsonObj.put(k, v)
+                            }
+                        }
                         val updated = employee.copy(
                             name = name.trim(),
                             type = type,
@@ -883,8 +1055,9 @@ fun AddEditEmployeeDialog(
                             contractorName = contractorName,
                             defaultWorkRole = workRole,
                             defaultUnit = unit,
-                            defaultShift = shift,
-                            permanentRemarks = remarks.trim()
+                            defaultShift = shift.ifBlank { availableShifts.firstOrNull() ?: "Shift A" },
+                            permanentRemarks = remarks.trim(),
+                            customFieldsJson = jsonObj.toString()
                         )
                         onSave(updated)
                     }

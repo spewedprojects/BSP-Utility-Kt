@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import com.gratus.bsputility.data.models.Contractor
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.ui.theme.PresentGreen
+import org.json.JSONObject
 
 @Composable
 fun AttendanceLabourDialog(
@@ -56,6 +57,8 @@ fun AttendanceLabourDialog(
     availableRoles: List<String>,
     availableContractors: List<Contractor>,
     availableUnits: List<String>,
+    availableShifts: List<String> = emptyList(),
+    isFutureDate: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (
         isPresent: Boolean,
@@ -82,7 +85,27 @@ fun AttendanceLabourDialog(
     var unitExpanded by remember { mutableStateOf(false) }
     var shiftExpanded by remember { mutableStateOf(false) }
 
-    val shifts = listOf("Shift A", "Shift B", "Shift C", "General")
+    val shifts = remember(availableShifts) {
+        if (availableShifts.isEmpty()) listOf("Shift A", "Shift B", "Shift C", "General") else availableShifts
+    }
+
+    val customFieldsMap = remember(employee.customFieldsJson) {
+        val map = mutableMapOf<String, String>()
+        try {
+            if (employee.customFieldsJson.isNotBlank()) {
+                val json = JSONObject(employee.customFieldsJson)
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val v = json.optString(k)
+                    if (v.isNotBlank()) {
+                        map[k] = v
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        map
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -136,15 +159,16 @@ fun AttendanceLabourDialog(
                                 fontSize = 14.sp
                             )
                             Text(
-                                text = if (isPresent) "Marked PRESENT" else "Marked ABSENT",
-                                color = if (isPresent) PresentGreen else MaterialTheme.colorScheme.error,
+                                text = if (isFutureDate) "Future date: Marking disabled" else if (isPresent) "Marked PRESENT" else "Marked ABSENT",
+                                color = if (isFutureDate) MaterialTheme.colorScheme.error else if (isPresent) PresentGreen else MaterialTheme.colorScheme.error,
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 12.sp
                             )
                         }
                         Switch(
-                            checked = isPresent,
-                            onCheckedChange = { isPresent = it },
+                            checked = if (isFutureDate) false else isPresent,
+                            onCheckedChange = { if (!isFutureDate) isPresent = it },
+                            enabled = !isFutureDate,
                             modifier = Modifier.testTag("switch_presence_labour"),
                             colors = SwitchDefaults.colors(checkedThumbColor = PresentGreen)
                         )
@@ -342,6 +366,30 @@ fun AttendanceLabourDialog(
                     }
                 }
 
+                if (customFieldsMap.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "Employee Custom Fields",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            customFieldsMap.forEach { (k, v) ->
+                                Text(
+                                    text = "• $k: $v",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Daily Remarks
                 OutlinedTextField(
                     value = remarks,
@@ -358,7 +406,7 @@ fun AttendanceLabourDialog(
             Button(
                 onClick = {
                     onSave(
-                        isPresent,
+                        if (isFutureDate) false else isPresent,
                         selectedDept,
                         selectedRole,
                         selectedContractor,

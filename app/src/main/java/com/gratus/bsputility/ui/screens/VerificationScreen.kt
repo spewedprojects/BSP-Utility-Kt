@@ -61,6 +61,7 @@ import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeTypes
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.material3.darkColorScheme
 import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
 import com.gratus.bsputility.ui.theme.MyApplicationTheme
@@ -281,7 +282,8 @@ fun DepartmentVerificationCard(
                     Column {
                         Text(
                             text = departmentName,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSecondary
                         )
                         Text(
                             text = "${labourList.size} Labourers Assigned Today",
@@ -406,7 +408,8 @@ fun DepartmentVerificationCard(
                 Text(
                     text = "Verified By (Department Head / Staff):",
                     style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSecondary
                 )
 
                 Surface(

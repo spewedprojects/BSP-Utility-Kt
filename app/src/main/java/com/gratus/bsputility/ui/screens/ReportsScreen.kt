@@ -141,7 +141,7 @@ fun ReportsScreenContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(modifier = Modifier.align(Alignment.CenterVertically)) {
+                    Row {
                         Text(
                             text = "BSP METATECH LLP, CHAKAN",
                             fontSize = 11.sp,
@@ -149,7 +149,9 @@ fun ReportsScreenContent(
                             color = IndustrialAmber600,
                             letterSpacing = 1.sp
                         )
+                        Spacer(modifier = Modifier.weight(1f))
                         Surface(
+                            modifier = Modifier.align(Alignment.CenterVertically),
                             shape = RoundedCornerShape(6.dp),
                             color = Color.White.copy(alpha = 0.15f)
                         ) {
@@ -158,7 +160,7 @@ fun ReportsScreenContent(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.5.dp)
                             )
                         }
                     }

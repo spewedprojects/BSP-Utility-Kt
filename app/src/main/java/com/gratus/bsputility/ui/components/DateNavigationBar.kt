@@ -23,6 +23,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,6 +63,7 @@ fun DateNavigationBar(
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     }
     val isToday = selectedDate == todayStr
+    val canGoNext = selectedDate < todayStr
 
     val displayDate = remember(selectedDate) {
         try {
@@ -133,9 +135,10 @@ fun DateNavigationBar(
                 }
             }
 
-            // Next day button
+            // Next day button (disabled for future dates)
             IconButton(
                 onClick = onNextDay,
+                enabled = canGoNext,
                 modifier = Modifier
                     .testTag("btn_next_date")
                     .size(44.dp)
@@ -143,7 +146,7 @@ fun DateNavigationBar(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = "Next Day",
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = if (canGoNext) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 )
             }
 
@@ -174,7 +177,28 @@ fun DateNavigationBar(
                 System.currentTimeMillis()
             }
         }
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialEpochMillis)
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = initialEpochMillis,
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                    val utcCal = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+                    utcCal.timeInMillis = utcTimeMillis
+                    val dateString = String.format(
+                        Locale.getDefault(),
+                        "%04d-%02d-%02d",
+                        utcCal.get(Calendar.YEAR),
+                        utcCal.get(Calendar.MONTH) + 1,
+                        utcCal.get(Calendar.DAY_OF_MONTH)
+                    )
+                    return dateString <= todayStr
+                }
+
+                override fun isSelectableYear(year: Int): Boolean {
+                    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+                    return year <= currentYear
+                }
+            }
+        )
 
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },

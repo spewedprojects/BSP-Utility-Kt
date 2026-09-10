@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -100,7 +101,7 @@ fun MasterDataScreenContent(
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(initialTab) }
-    val tabs = listOf("Contractors", "Departments", "Designations", "Units", "Labour Roles", "Custom Fields")
+    val tabs = listOf("Contractors", "Departments", "Designations", "Units", "Shifts", "Labour Roles", "Custom Fields")
 
     // Modals
     var showAddContractorDialog by remember { mutableStateOf<Contractor?>(null) }
@@ -108,39 +109,12 @@ fun MasterDataScreenContent(
     var showAddConfigDialog by remember { mutableStateOf(false) }
     var newConfigCategory by remember { mutableStateOf("DEPARTMENT") }
 
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    if (selectedTab == "Contractors") {
-                        isNewContractor = true
-                        showAddContractorDialog =
-                            Contractor(name = "", contactPerson = "", phone = "", notes = "")
-                    } else {
-                        newConfigCategory = when (selectedTab) {
-                            "Departments" -> "DEPARTMENT"
-                            "Designations" -> "DESIGNATION"
-                            "Units" -> "UNIT"
-                            "Labour Roles" -> "LABOUR_ROLE"
-                            else -> "CUSTOM_FIELD"
-                        }
-                        showAddConfigDialog = true
-                    }
-                },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .padding(bottom = 0.dp)
-                    .testTag("fab_add_master_item")
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Item")
-            }
-        }
-    ) { innerPadding ->
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
         Column(
-            modifier = modifier
+            modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
             // Header
@@ -251,11 +225,12 @@ fun MasterDataScreenContent(
                         }
                     }
                 } else {
-                    // Category Items (Departments, Designations, Units, Labour Roles, Custom Fields)
+                    // Category Items (Departments, Designations, Units, Shifts, Labour Roles, Custom Fields)
                     val catKey = when (selectedTab) {
                         "Departments" -> "DEPARTMENT"
                         "Designations" -> "DESIGNATION"
                         "Units" -> "UNIT"
+                        "Shifts" -> "SHIFT"
                         "Labour Roles" -> "LABOUR_ROLE"
                         else -> "CUSTOM_FIELD"
                     }
@@ -288,7 +263,21 @@ fun MasterDataScreenContent(
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = 14.sp
                                     )
-                                    if (item.extraType.isNotBlank()) {
+                                    if (item.category == "CUSTOM_FIELD") {
+                                        val parts = item.extraType.split("|")
+                                        val typeDisplay = parts.getOrNull(0)?.ifBlank { "TEXT" } ?: "TEXT"
+                                        val target = parts.getOrNull(1)?.uppercase() ?: "ALL"
+                                        val targetDisplay = when (target) {
+                                            "STAFF" -> "Staff Only"
+                                            "LABOUR" -> "Labour Only"
+                                            else -> "All Employees"
+                                        }
+                                        Text(
+                                            text = "Type: $typeDisplay • Applies to: $targetDisplay",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    } else if (item.extraType.isNotBlank()) {
                                         Text(
                                             text = "Type: ${item.extraType}",
                                             fontSize = 11.sp,
@@ -308,9 +297,37 @@ fun MasterDataScreenContent(
                 }
 
                 item {
-                    Spacer(modifier = Modifier.height(100.dp))
+                    Spacer(modifier = Modifier.height(80.dp))
                 }
             }
+        }
+
+        FloatingActionButton(
+            onClick = {
+                if (selectedTab == "Contractors") {
+                    isNewContractor = true
+                    showAddContractorDialog =
+                        Contractor(name = "", contactPerson = "", phone = "", notes = "")
+                } else {
+                    newConfigCategory = when (selectedTab) {
+                        "Departments" -> "DEPARTMENT"
+                        "Designations" -> "DESIGNATION"
+                        "Units" -> "UNIT"
+                        "Shifts" -> "SHIFT"
+                        "Labour Roles" -> "LABOUR_ROLE"
+                        else -> "CUSTOM_FIELD"
+                    }
+                    showAddConfigDialog = true
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .testTag("fab_add_master_item")
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Add Item")
         }
     }
 
@@ -417,18 +434,21 @@ fun AddConfigDialog(
 ) {
     var itemName by remember { mutableStateOf("") }
     var fieldType by remember { mutableStateOf("TEXT") }
+    var targetAudience by remember { mutableStateOf("ALL") } // ALL, STAFF, LABOUR
+
+    val dialogTitle = if (tabTitle == "Shifts") "Add Shift" else "Add to ${tabTitle.removeSuffix("s")}"
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text("Add to ${tabTitle.removeSuffix("s")}")
+            Text(dialogTitle)
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = itemName,
                     onValueChange = { itemName = it },
-                    label = { Text("Name / Title *") },
+                    label = { Text(if (category == "SHIFT") "Shift Name (e.g. Shift A, General) *" else "Name / Title *") },
                     modifier = Modifier.fillMaxWidth().testTag("input_config_name")
                 )
 
@@ -444,13 +464,26 @@ fun AddConfigDialog(
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text("Applies To:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf("ALL" to "All Employees", "STAFF" to "Staff Only", "LABOUR" to "Labour Only").forEach { (targetKey, label) ->
+                            FilterChip(
+                                selected = targetAudience == targetKey,
+                                onClick = { targetAudience = targetKey },
+                                label = { Text(label, fontSize = 10.sp) }
+                            )
+                        }
+                    }
                 }
             }
         },
         confirmButton = {
             Button(onClick = {
                 if (itemName.isNotBlank()) {
-                    onSave(itemName.trim(), fieldType)
+                    val finalExtraType = if (category == "CUSTOM_FIELD") "$fieldType|$targetAudience" else fieldType
+                    onSave(itemName.trim(), finalExtraType)
                 }
             }) {
                 Text("Add")
@@ -500,6 +533,24 @@ fun MasterDataScreenPreview_Departments() {
             onAddConfigItem = { _, _, _ -> },
             onDeleteConfigItem = {},
             initialTab = "Departments"
+        )
+    }
+}
+
+@Preview(name = "Master Data - Shifts Tab", showBackground = true)
+@Composable
+fun MasterDataScreenPreview_Shifts() {
+    MyApplicationTheme {
+        MasterDataScreenContent(
+            contractors = PreviewData.sampleContractors,
+            allConfigs = PreviewData.sampleConfigItems,
+            allEmployees = PreviewData.sampleEmployees,
+            onAddContractor = {},
+            onUpdateContractor = {},
+            onDeleteContractor = {},
+            onAddConfigItem = { _, _, _ -> },
+            onDeleteConfigItem = {},
+            initialTab = "Shifts"
         )
     }
 }

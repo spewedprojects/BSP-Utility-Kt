@@ -133,21 +133,33 @@ abstract class AppDatabase : RoomDatabase() {
                     "Housekeeping"
                 ).map { ConfigItem(category = "LABOUR_ROLE", name = it) }
 
+                val shifts = listOf(
+                    "Shift A",
+                    "Shift B",
+                    "Shift C",
+                    "General"
+                ).map { ConfigItem(category = "SHIFT", name = it) }
+
                 val customFields = listOf(
                     ConfigItem(
                         category = "CUSTOM_FIELD",
                         name = "Aadhaar Verified",
-                        extraType = "BOOLEAN"
+                        extraType = "BOOLEAN|ALL"
                     ),
                     ConfigItem(
                         category = "CUSTOM_FIELD",
                         name = "Safety Shoes Issued",
-                        extraType = "BOOLEAN"
+                        extraType = "BOOLEAN|LABOUR"
                     ),
                     ConfigItem(
                         category = "CUSTOM_FIELD",
                         name = "Skill Grade",
-                        extraType = "DROPDOWN"
+                        extraType = "DROPDOWN|LABOUR"
+                    ),
+                    ConfigItem(
+                        category = "CUSTOM_FIELD",
+                        name = "PF Number",
+                        extraType = "TEXT|STAFF"
                     )
                 )
 
@@ -155,6 +167,7 @@ abstract class AppDatabase : RoomDatabase() {
                 dao.insertConfigItems(designations)
                 dao.insertConfigItems(units)
                 dao.insertConfigItems(roles)
+                dao.insertConfigItems(shifts)
                 dao.insertConfigItems(customFields)
 
                 // 3. Initial Staff Employees

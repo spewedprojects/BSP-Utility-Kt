@@ -29,6 +29,10 @@ import androidx.compose.material.icons.filled.Comment
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -75,6 +79,12 @@ import com.gratus.bsputility.ui.theme.PresentGreen
 import com.gratus.bsputility.ui.theme.PresentGreenLight
 import com.gratus.bsputility.ui.theme.StatusDebarred
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.collections.forEach
 
 @Composable
@@ -86,6 +96,7 @@ fun AttendanceScreen(
     val summary by viewModel.manpowerSummary.collectAsStateWithLifecycle()
     val contractors by viewModel.allContractors.collectAsStateWithLifecycle()
     val configItems by viewModel.allConfigItems.collectAsStateWithLifecycle()
+    val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
 
     val searchQuery by viewModel.attendanceSearchQuery.collectAsStateWithLifecycle()
     val filterType by viewModel.attendanceFilterType.collectAsStateWithLifecycle()
@@ -101,6 +112,10 @@ fun AttendanceScreen(
     val units = remember(configItems) {
         configItems.filter { it.category == "UNIT" }.map { it.name }
     }
+    val shifts = remember(configItems) {
+        val list = configItems.filter { it.category == "SHIFT" }.map { it.name }
+        if (list.isEmpty()) listOf("Shift A", "Shift B", "Shift C", "General") else list
+    }
 
     AttendanceScreenContent(
         items = items,
@@ -109,6 +124,8 @@ fun AttendanceScreen(
         departments = departments,
         roles = roles,
         units = units,
+        shifts = shifts,
+        selectedDate = selectedDate,
         searchQuery = searchQuery,
         onSearchQueryChange = { viewModel.attendanceSearchQuery.value = it },
         filterType = filterType,
@@ -147,6 +164,8 @@ fun AttendanceScreenContent(
     departments: List<String>,
     roles: List<String>,
     units: List<String>,
+    shifts: List<String> = listOf("Shift A", "Shift B", "Shift C", "General"),
+    selectedDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     filterType: String,
@@ -170,8 +189,15 @@ fun AttendanceScreenContent(
     ) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val todayStr = remember {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    }
+    val isFutureDate = selectedDate > todayStr
+
     // Dialog state
     var selectedItemForDialog by remember { mutableStateOf<ManpowerViewModel.EmployeeAttendanceItem?>(null) }
+    var debarredItemToConfirm by remember { mutableStateOf<ManpowerViewModel.EmployeeAttendanceItem?>(null) }
     var showContractorMenu by remember { mutableStateOf(false) }
     var showDeptMenu by remember { mutableStateOf(false) }
 
@@ -195,7 +221,7 @@ fun AttendanceScreenContent(
             ) {
                 Column {
                     Text(
-                        text = "MANPOWER TODAY",
+                        text = if (isFutureDate) "FUTURE RECORD ($selectedDate)" else "MANPOWER TODAY",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
@@ -220,11 +246,41 @@ fun AttendanceScreenContent(
 
                 OutlinedButton(
                     onClick = onMarkAllPresent,
+                    enabled = !isFutureDate,
                     modifier = Modifier.testTag("btn_mark_all_present")
                 ) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Mark All", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        // --- FUTURE DATE WARNING BANNER ---
+        if (isFutureDate) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Future Date ($selectedDate): Attendance marking is disabled.",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
                 }
             }
         }
@@ -396,7 +452,16 @@ fun AttendanceScreenContent(
                 items(items, key = { it.employee.id }) { item ->
                     AttendanceCard(
                         item = item,
-                        onTogglePresence = { onTogglePresence(item) },
+                        isFutureDate = isFutureDate,
+                        onTogglePresence = {
+                            if (isFutureDate) {
+                                Toast.makeText(context, "Cannot mark attendance for future dates", Toast.LENGTH_SHORT).show()
+                            } else if (item.employee.status == EmployeeStatuses.DEBARRED && !item.isPresent) {
+                                debarredItemToConfirm = item
+                            } else {
+                                onTogglePresence(item)
+                            }
+                        },
                         onEditDetails = { selectedItemForDialog = item }
                     )
                 }
@@ -415,6 +480,7 @@ fun AttendanceScreenContent(
                 currentPresence = item.isPresent,
                 currentTime = item.attendanceTime,
                 currentRemarks = item.dayRemarks,
+                isFutureDate = isFutureDate,
                 onDismiss = { selectedItemForDialog = null },
                 onSave = { isPresent, time, remarks ->
                     onSaveStaffAttendance(item.employee, isPresent, time, remarks)
@@ -435,6 +501,8 @@ fun AttendanceScreenContent(
                 availableRoles = roles,
                 availableContractors = contractors,
                 availableUnits = units,
+                availableShifts = shifts,
+                isFutureDate = isFutureDate,
                 onDismiss = { selectedItemForDialog = null },
                 onSave = { isPresent, dept, role, contractor, unit, shift, remarks ->
                     onSaveLabourAssignment(
@@ -452,11 +520,65 @@ fun AttendanceScreenContent(
             )
         }
     }
+
+    // Confirmation dialog for Debarred Employee Presence Toggle
+    debarredItemToConfirm?.let { debarredItem ->
+        AlertDialog(
+            onDismissRequest = { debarredItemToConfirm = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Warning",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text("Debarred Worker Alert", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "${debarredItem.employee.name} is currently marked as DEBARRED.",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    if (debarredItem.employee.permanentRemarks.isNotBlank()) {
+                        Text(
+                            text = "Debarment Reason: ${debarredItem.employee.permanentRemarks}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = "Are you sure you want to mark this worker present for today's shift?",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onTogglePresence(debarredItem)
+                        debarredItemToConfirm = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Mark Present Anyway")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { debarredItemToConfirm = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 fun AttendanceCard(
     item: ManpowerViewModel.EmployeeAttendanceItem,
+    isFutureDate: Boolean = false,
     onTogglePresence: () -> Unit,
     onEditDetails: () -> Unit,
     modifier: Modifier = Modifier
@@ -553,8 +675,8 @@ fun AttendanceCard(
                     )
                 }
 
-                // Attendance time for staff
-                if (emp.type == EmployeeTypes.STAFF && item.attendanceTime.isNotBlank()) {
+                // Attendance time for staff - only when present
+                if (emp.type == EmployeeTypes.STAFF && item.isPresent && item.attendanceTime.isNotBlank()) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -594,6 +716,46 @@ fun AttendanceCard(
                         )
                     }
                 }
+
+                // Custom fields summary tags
+                val customFieldsMap = remember(emp.customFieldsJson) {
+                    val map = mutableMapOf<String, String>()
+                    try {
+                        if (emp.customFieldsJson.isNotBlank()) {
+                            val json = JSONObject(emp.customFieldsJson)
+                            val keys = json.keys()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                val v = json.optString(k)
+                                if (v.isNotBlank()) {
+                                    map[k] = v
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                    map
+                }
+                if (customFieldsMap.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        customFieldsMap.entries.take(2).forEach { (k, v) ->
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Text(
+                                    text = if (v.equals("true", ignoreCase = true)) k else "$k: $v",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -603,12 +765,23 @@ fun AttendanceCard(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(if (item.isPresent) PresentGreen else MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { onTogglePresence() }
+                    .background(
+                        if (isFutureDate) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        else if (item.isPresent) PresentGreen
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    .clickable(enabled = !isFutureDate) { onTogglePresence() }
                     .testTag("btn_toggle_presence_${emp.id}"),
                 contentAlignment = Alignment.Center
             ) {
-                if (item.isPresent) {
+                if (isFutureDate) {
+                    Text(
+                        text = "—",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                    )
+                } else if (item.isPresent) {
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = "Marked Present",

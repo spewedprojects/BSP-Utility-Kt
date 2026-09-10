@@ -48,11 +48,11 @@ data class DailyAttendance(
     val employeeType: String,
     val isPresent: Boolean = false,
     // Dynamic daily overrides (applies only to this day's attendance without modifying master record)
-    val dayDepartment: String,
-    val dayWorkRole: String,
-    val dayContractorName: String,
-    val dayUnit: String,
-    val dayShift: String,
+    val dayDepartment: String = "",
+    val dayWorkRole: String = "",
+    val dayContractorName: String = "",
+    val dayUnit: String = "",
+    val dayShift: String = "",
     val attendanceTime: String = "", // For staff (e.g. "08:45 AM")
     val dayRemarks: String = "", // e.g. "Assigned to Laser today"
     val updatedAt: Long = System.currentTimeMillis()

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -69,16 +70,18 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     val verificationRecords: StateFlow<List<DepartmentVerification>> = _verificationStream.asStateFlow()
 
     init {
-        // Collect attendance whenever selectedDate changes
+        // Collect attendance whenever selectedDate changes using collectLatest to cancel previous date
         viewModelScope.launch {
-            selectedDate.collect { date ->
+            selectedDate.collectLatest { date ->
+                _attendanceStream.value = emptyList()
                 repository.getAttendanceForDate(date).collect { list ->
                     _attendanceStream.value = list
                 }
             }
         }
         viewModelScope.launch {
-            selectedDate.collect { date ->
+            selectedDate.collectLatest { date ->
+                _verificationStream.value = emptyList()
                 repository.getVerificationsForDate(date).collect { list ->
                     _verificationStream.value = list
                 }
@@ -86,7 +89,12 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    // --- DATE NAVIGATION ---
+    // --- DATE NAVIGATION & FUTURE GUARDS ---
+    fun isDateInFuture(dateString: String): Boolean {
+        val todayStr = dateFormat.format(Date())
+        return dateString > todayStr
+    }
+
     fun selectPreviousDay() {
         try {
             val cal = Calendar.getInstance()
@@ -98,21 +106,30 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
     fun selectNextDay() {
         try {
+            val todayStr = dateFormat.format(Date())
+            if (_selectedDate.value >= todayStr) return // Do not allow navigating into future
+
             val cal = Calendar.getInstance()
             cal.time = dateFormat.parse(_selectedDate.value) ?: Date()
             cal.add(Calendar.DAY_OF_YEAR, 1)
-            _selectedDate.value = dateFormat.format(cal.time)
+            val nextDate = dateFormat.format(cal.time)
+            if (nextDate <= todayStr) {
+                _selectedDate.value = nextDate
+            }
         } catch (_: Exception) {}
     }
 
     fun selectDate(dateString: String) {
-        _selectedDate.value = dateString
+        val todayStr = dateFormat.format(Date())
+        _selectedDate.value = if (dateString > todayStr) todayStr else dateString
     }
 
     fun setDateFromCalendar(year: Int, month: Int, dayOfMonth: Int) {
         val cal = Calendar.getInstance()
         cal.set(year, month, dayOfMonth)
-        _selectedDate.value = dateFormat.format(cal.time)
+        val formatted = dateFormat.format(cal.time)
+        val todayStr = dateFormat.format(Date())
+        _selectedDate.value = if (formatted > todayStr) todayStr else formatted
     }
 
     // --- EFFECTIVE ATTENDANCE COMBINATION ---
@@ -268,10 +285,13 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
     // --- ATTENDANCE ACTIONS ---
     fun toggleAttendance(item: EmployeeAttendanceItem) {
+        if (isDateInFuture(_selectedDate.value)) return
         viewModelScope.launch {
             val newPresence = !item.isPresent
             val defaultTime = if (newPresence && item.employee.type == EmployeeTypes.STAFF && item.attendanceTime.isBlank()) {
                 SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+            } else if (!newPresence) {
+                ""
             } else item.attendanceTime
 
             val record = DailyAttendance(
@@ -303,8 +323,9 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         shift: String,
         remarks: String
     ) {
+        if (isDateInFuture(_selectedDate.value)) return
         viewModelScope.launch {
-            val existing = _attendanceStream.value.find { it.employeeId == employee.id }
+            val existing = _attendanceStream.value.find { it.employeeId == employee.id && it.date == _selectedDate.value }
             val record = DailyAttendance(
                 id = existing?.id ?: 0,
                 date = _selectedDate.value,
@@ -330,8 +351,9 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         attendanceTime: String,
         remarks: String
     ) {
+        if (isDateInFuture(_selectedDate.value)) return
         viewModelScope.launch {
-            val existing = _attendanceStream.value.find { it.employeeId == employee.id }
+            val existing = _attendanceStream.value.find { it.employeeId == employee.id && it.date == _selectedDate.value }
             val record = DailyAttendance(
                 id = existing?.id ?: 0,
                 date = _selectedDate.value,
@@ -344,7 +366,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 dayContractorName = "",
                 dayUnit = employee.defaultUnit,
                 dayShift = employee.defaultShift,
-                attendanceTime = attendanceTime,
+                attendanceTime = if (isPresent) attendanceTime else "",
                 dayRemarks = remarks
             )
             repository.markAttendance(record)
@@ -352,8 +374,9 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun markAllActivePresent() {
+        if (isDateInFuture(_selectedDate.value)) return
         viewModelScope.launch {
-            val activeEmps = allEmployees.value.filter { it.status != EmployeeStatuses.OUT }
+            val activeEmps = allEmployees.value.filter { it.status == EmployeeStatuses.ACTIVE }
             val currentMap = _attendanceStream.value.associateBy { it.employeeId }
             val timeNow = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
 
@@ -388,6 +411,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         isVerified: Boolean,
         remarks: String = ""
     ) {
+        if (isDateInFuture(_selectedDate.value)) return
         viewModelScope.launch {
             repository.verifyDepartment(
                 date = _selectedDate.value,
