@@ -253,4 +253,143 @@ class ReverificationFeaturesTest {
         assertEquals(false, yesterdayItems.first { it.first == "John Doe" }.second)
         assertEquals(false, yesterdayItems.first { it.first == "Jane Smith" }.second)
     }
+
+    @Test
+    fun `labourer permanent department is strictly blank while staff retains department`() {
+        val staff = Employee(
+            id = 1L,
+            name = "Rakesh Kulkarni",
+            type = EmployeeTypes.STAFF,
+            status = EmployeeStatuses.ACTIVE,
+            dateAdded = "2026-09-10",
+            permanentDepartment = "HR & Admin",
+            designation = "HR Trainee"
+        )
+        val labourer = Employee(
+            id = 2L,
+            name = "Vijay Thorat",
+            type = EmployeeTypes.LABOUR,
+            status = EmployeeStatuses.ACTIVE,
+            dateAdded = "2026-09-10",
+            permanentDepartment = "",
+            contractorName = "Apex Industrial Services",
+            defaultWorkRole = "Helper"
+        )
+
+        // Simulating save logic
+        fun saveEmployee(emp: Employee, enteredDept: String): Employee {
+            val finalDept = if (emp.type == EmployeeTypes.STAFF) enteredDept.trim() else ""
+            return emp.copy(permanentDepartment = finalDept)
+        }
+
+        val savedStaff = saveEmployee(staff, "Welding Shop")
+        val savedLabour = saveEmployee(labourer, "Welding Shop")
+
+        assertEquals("Welding Shop", savedStaff.permanentDepartment)
+        assertEquals("", savedLabour.permanentDepartment)
+    }
+
+    @Test
+    fun `batch paste import assigns permanent department to staff only, not labourers`() {
+        val names = listOf("Worker A", "Worker B")
+        val defaultDept = "Welding Shop"
+
+        fun createFromImport(name: String, targetType: String, dept: String): Employee {
+            return Employee(
+                name = name,
+                type = targetType,
+                dateAdded = "2026-09-10",
+                permanentDepartment = if (targetType == EmployeeTypes.STAFF) dept else ""
+            )
+        }
+
+        val staffEmps = names.map { createFromImport(it, EmployeeTypes.STAFF, defaultDept) }
+        val labourEmps = names.map { createFromImport(it, EmployeeTypes.LABOUR, defaultDept) }
+
+        assertTrue(staffEmps.all { it.permanentDepartment == "Welding Shop" })
+        assertTrue(labourEmps.all { it.permanentDepartment.isEmpty() })
+    }
+
+    @Test
+    fun `effective attendance department falls back to Unassigned for unallotted labourers`() {
+        val labourer = Employee(
+            id = 10L,
+            name = "Ramesh Pawar",
+            type = EmployeeTypes.LABOUR,
+            permanentDepartment = "",
+            defaultWorkRole = "Welder",
+            dateAdded = "2026-09-10"
+        )
+        val staff = Employee(
+            id = 20L,
+            name = "Rajesh Patil",
+            type = EmployeeTypes.STAFF,
+            permanentDepartment = "Welding Shop",
+            dateAdded = "2026-09-10"
+        )
+
+        // Case 1: No daily attendance record yet
+        val attLabour1 = null as com.gratus.bsputility.data.models.DailyAttendance?
+        val effDeptLabour1 = attLabour1?.dayDepartment?.ifBlank { null }
+            ?: labourer.permanentDepartment.ifBlank { "Unassigned" }
+        assertEquals("Unassigned", effDeptLabour1)
+
+        val attStaff1 = null as com.gratus.bsputility.data.models.DailyAttendance?
+        val effDeptStaff1 = attStaff1?.dayDepartment?.ifBlank { null }
+            ?: staff.permanentDepartment.ifBlank { "Unassigned" }
+        assertEquals("Welding Shop", effDeptStaff1)
+
+        // Case 2: Daily department allotted on morning attendance
+        val attLabour2 = com.gratus.bsputility.data.models.DailyAttendance(
+            date = "2026-09-10",
+            employeeId = 10L,
+            employeeName = "Ramesh Pawar",
+            employeeType = EmployeeTypes.LABOUR,
+            dayDepartment = "Laser Cutting"
+        )
+        val effDeptLabour2 = attLabour2.dayDepartment.ifBlank { null }
+            ?: labourer.permanentDepartment.ifBlank { "Unassigned" }
+        assertEquals("Laser Cutting", effDeptLabour2)
+    }
+
+    @Test
+    fun `rooster filters correctly by contractor and department`() {
+        val employees = listOf(
+            Employee(id = 1L, name = "Rakesh Staff", type = EmployeeTypes.STAFF, permanentDepartment = "HR & Admin", contractorName = "", dateAdded = "2026-09-10"),
+            Employee(id = 2L, name = "Rajesh Staff", type = EmployeeTypes.STAFF, permanentDepartment = "Welding Shop", contractorName = "", dateAdded = "2026-09-10"),
+            Employee(id = 3L, name = "Apex Worker 1", type = EmployeeTypes.LABOUR, permanentDepartment = "", contractorName = "Apex Industrial Services", dateAdded = "2026-09-10"),
+            Employee(id = 4L, name = "Apex Worker 2", type = EmployeeTypes.LABOUR, permanentDepartment = "", contractorName = "Apex Industrial Services", dateAdded = "2026-09-10"),
+            Employee(id = 5L, name = "Chakan Worker", type = EmployeeTypes.LABOUR, permanentDepartment = "", contractorName = "Chakan Workforce", dateAdded = "2026-09-10")
+        )
+
+        fun filterRooster(
+            list: List<Employee>,
+            contractor: String?,
+            department: String?
+        ): List<Employee> {
+            return list.filter { emp ->
+                val matchesContractor = contractor == null || emp.contractorName.equals(contractor, ignoreCase = true)
+                val matchesDept = department == null || emp.permanentDepartment.equals(department, ignoreCase = true)
+                matchesContractor && matchesDept
+            }
+        }
+
+        // 1. No filters -> all 5 returned
+        assertEquals(5, filterRooster(employees, null, null).size)
+
+        // 2. Contractor filter -> only Apex
+        val apexList = filterRooster(employees, "Apex Industrial Services", null)
+        assertEquals(2, apexList.size)
+        assertTrue(apexList.all { it.contractorName == "Apex Industrial Services" })
+
+        // 3. Department filter -> HR & Admin
+        val hrList = filterRooster(employees, null, "HR & Admin")
+        assertEquals(1, hrList.size)
+        assertEquals("Rakesh Staff", hrList[0].name)
+
+        // 4. Department filter -> Welding Shop
+        val weldingList = filterRooster(employees, null, "Welding Shop")
+        assertEquals(1, weldingList.size)
+        assertEquals("Rajesh Staff", weldingList[0].name)
+    }
 }

@@ -71,7 +71,16 @@ fun AttendanceLabourDialog(
     ) -> Unit
 ) {
     var isPresent by remember { mutableStateOf(currentPresence) }
-    var selectedDept by remember { mutableStateOf(currentDepartment.ifBlank { employee.permanentDepartment }) }
+    val defaultDeptInitial = remember(currentDepartment, employee.permanentDepartment, availableDepartments) {
+        if (currentDepartment.isNotBlank() && currentDepartment != "Unassigned") {
+            currentDepartment
+        } else if (employee.permanentDepartment.isNotBlank() && employee.permanentDepartment != "Unassigned") {
+            employee.permanentDepartment
+        } else {
+            availableDepartments.firstOrNull() ?: "Welding Shop"
+        }
+    }
+    var selectedDept by remember { mutableStateOf(defaultDeptInitial) }
     var selectedRole by remember { mutableStateOf(currentWorkRole.ifBlank { employee.defaultWorkRole }) }
     var selectedContractor by remember { mutableStateOf(currentContractor.ifBlank { employee.contractorName }) }
     var selectedUnit by remember { mutableStateOf(currentUnit.ifBlank { employee.defaultUnit }) }

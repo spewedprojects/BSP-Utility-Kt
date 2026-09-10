@@ -45,6 +45,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     // Search and filters for Rooster (Employee Library)
     val roosterSearchQuery = MutableStateFlow("")
     val roosterFilterStatus = MutableStateFlow("All") // All, Staff, Labour, Housekeeping, Debarred, Out
+    val roosterFilterContractor = MutableStateFlow<String?>(null)
+    val roosterFilterDepartment = MutableStateFlow<String?>(null)
     val collapsedGroups = MutableStateFlow<Map<String, Boolean>>(emptyMap())
 
     init {
@@ -175,7 +177,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             EmployeeAttendanceItem(
                 employee = emp,
                 isPresent = att?.isPresent ?: false,
-                effectiveDepartment = att?.dayDepartment ?: emp.permanentDepartment,
+                effectiveDepartment = att?.dayDepartment?.ifBlank { null }
+                    ?: emp.permanentDepartment.ifBlank { "Unassigned" },
                 effectiveWorkRole = att?.dayWorkRole ?: emp.defaultWorkRole,
                 effectiveContractor = att?.dayContractorName ?: emp.contractorName,
                 effectiveUnit = att?.dayUnit ?: emp.defaultUnit,
@@ -479,7 +482,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 type = targetType,
                 status = EmployeeStatuses.ACTIVE,
                 dateAdded = todayStr,
-                permanentDepartment = defaultDept,
+                permanentDepartment = if (targetType == EmployeeTypes.STAFF) defaultDept else "",
                 designation = if (targetType == EmployeeTypes.STAFF) defaultRole else "",
                 contractorId = contractorId,
                 contractorName = contractorName,
@@ -524,7 +527,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                         type = type,
                         status = status,
                         dateAdded = todayStr,
-                        permanentDepartment = dept,
+                        permanentDepartment = if (type == EmployeeTypes.STAFF) dept else "",
                         designation = if (type == EmployeeTypes.STAFF) role else "",
                         contractorName = contractor,
                         defaultWorkRole = role,

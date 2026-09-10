@@ -295,7 +295,7 @@ fun AttendanceScreenContent(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
-                    placeholder = { Text("Who's where? Search name, dept, role, contractor...") },
+                    placeholder = { Text("Search name, dept, role, contractor...") },
                     leadingIcon = {
                         Icon(Icons.Default.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary)
                     },
@@ -390,6 +390,9 @@ fun AttendanceScreenContent(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(14.dp))
                                 }
                             )
                             DropdownMenu(

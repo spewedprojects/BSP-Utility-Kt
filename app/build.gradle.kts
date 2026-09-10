@@ -16,8 +16,8 @@ android {
     applicationId = "com.gratus.bsputility"
     minSdk = 24
     targetSdk = 37
-    versionCode = 3
-    versionName = "1.2.0"
+    versionCode = 4
+    versionName = "1.3.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -41,7 +41,8 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
@@ -58,6 +59,19 @@ android {
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
+  }
+}
+
+androidComponents {
+  onVariants { variant ->
+    val baseName = if (variant.buildType == "debug") {
+      "BSP.Utility_${variant.buildType}"
+    } else {
+      "BSP.Utility_v${android.defaultConfig.versionName}-${variant.buildType}"
+    }
+    variant.outputs.forEach { output ->
+      (output as? com.android.build.api.variant.impl.VariantOutputImpl)?.outputFileName?.set("$baseName.apk")
+    }
   }
 }
 

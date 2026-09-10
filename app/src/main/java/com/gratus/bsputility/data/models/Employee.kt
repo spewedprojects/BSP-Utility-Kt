@@ -27,7 +27,7 @@ data class Employee(
     val type: String = EmployeeTypes.LABOUR, // Staff, Contract Labour, Housekeeping
     val status: String = EmployeeStatuses.ACTIVE, // Active, Out, Debarred
     val dateAdded: String, // Auto recorded date string (e.g. "2026-09-10")
-    val permanentDepartment: String = "Welding Shop",
+    val permanentDepartment: String = "",
     val designation: String = "", // For staff (e.g. HR Trainee, Supervisor)
     val contractorId: Long? = null,
     val contractorName: String = "", // Associated contractor

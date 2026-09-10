@@ -3,7 +3,7 @@
     android:height="1100dp"
     android:viewportWidth="1100"
     android:viewportHeight="1100">
-  <group android:scaleY="0.7" android:scaleX="0.7" android:pivotX="550" android:pivotY="550">
+  <group android:scaleY="0.6" android:scaleX="0.6" android:pivotX="550" android:pivotY="550">
   <path
       android:pathData="M292.7,1029c-32.1,0.1 -58.2,-25.9 -58.2,-58l-0.1,-746.3c0,-32 25.9,-58 57.9,-58l71.7,-0.1c5.5,0 10,4.5 10,10v32.7c0,22.1 17.9,40 39.9,40l276,0.4c22.2,0 40.2,-18 40.1,-40.2l-0.2,-32.7c-0,-5.5 4.5,-10.1 10,-10.1h67.1c32,0 58,26 58,58l-0.1,744.3c0,32 -25.8,57.9 -57.8,58l-514.3,1.9Z"
       android:fillColor="#edf2f7"/>

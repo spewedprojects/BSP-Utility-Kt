@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -73,6 +74,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -102,6 +104,8 @@ fun RoosterScreen(
 
     val searchQuery by viewModel.roosterSearchQuery.collectAsStateWithLifecycle()
     val filterStatus by viewModel.roosterFilterStatus.collectAsStateWithLifecycle()
+    val filterContractor by viewModel.roosterFilterContractor.collectAsStateWithLifecycle()
+    val filterDepartment by viewModel.roosterFilterDepartment.collectAsStateWithLifecycle()
     val collapsedGroups by viewModel.collapsedGroups.collectAsStateWithLifecycle()
 
     val departments = remember(configItems) {
@@ -137,6 +141,10 @@ fun RoosterScreen(
         onSearchQueryChange = { viewModel.roosterSearchQuery.value = it },
         filterStatus = filterStatus,
         onFilterStatusChange = { viewModel.roosterFilterStatus.value = it },
+        filterContractor = filterContractor,
+        onFilterContractorChange = { viewModel.roosterFilterContractor.value = it },
+        filterDepartment = filterDepartment,
+        onFilterDepartmentChange = { viewModel.roosterFilterDepartment.value = it },
         collapsedGroups = collapsedGroups,
         onToggleCollapse = { viewModel.toggleCategoryCollapse(it) },
         onAddEmployee = { viewModel.addEmployee(it) },
@@ -167,6 +175,10 @@ fun RoosterScreenContent(
     onSearchQueryChange: (String) -> Unit,
     filterStatus: String,
     onFilterStatusChange: (String) -> Unit,
+    filterContractor: String? = null,
+    onFilterContractorChange: (String?) -> Unit = {},
+    filterDepartment: String? = null,
+    onFilterDepartmentChange: (String?) -> Unit = {},
     collapsedGroups: Map<String, Boolean>,
     onToggleCollapse: (String) -> Unit,
     onAddEmployee: (Employee) -> Unit,
@@ -193,9 +205,11 @@ fun RoosterScreenContent(
     var showPasteImportDialog by remember { mutableStateOf(false) }
     var showJsonExportImportDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf<Employee?>(null) }
+    var showContractorMenu by remember { mutableStateOf(false) }
+    var showDeptMenu by remember { mutableStateOf(false) }
 
-    // Filter employees based on search & filter chip
-    val filteredEmployees = remember(allEmployees, searchQuery, filterStatus) {
+    // Filter employees based on search & filter chips
+    val filteredEmployees = remember(allEmployees, searchQuery, filterStatus, filterContractor, filterDepartment) {
         allEmployees.filter { emp ->
             val matchesQuery = searchQuery.isBlank() ||
                 emp.name.contains(searchQuery, ignoreCase = true) ||
@@ -212,7 +226,14 @@ fun RoosterScreenContent(
                 "Out" -> emp.status == EmployeeStatuses.OUT
                 else -> true
             }
-            matchesQuery && matchesFilter
+
+            val matchesContractor = filterContractor == null ||
+                emp.contractorName.equals(filterContractor, ignoreCase = true)
+
+            val matchesDepartment = filterDepartment == null ||
+                emp.permanentDepartment.equals(filterDepartment, ignoreCase = true)
+
+            matchesQuery && matchesFilter && matchesContractor && matchesDepartment
         }
     }
 
@@ -304,7 +325,8 @@ fun RoosterScreenContent(
                     // Filter chips
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         val filters = listOf("All", "Staff", "Labour", "Housekeeping", "Debarred", "Out")
                         items(filters) { f ->
@@ -313,6 +335,90 @@ fun RoosterScreenContent(
                                 onClick = { onFilterStatusChange(f) },
                                 label = { Text(f, fontSize = 12.sp) }
                             )
+                        }
+
+                        // Contractor filter dropdown chip
+                        item {
+                            Box {
+                                FilterChip(
+                                    selected = filterContractor != null,
+                                    onClick = { showContractorMenu = true },
+                                    label = {
+                                        Text(
+                                            text = filterContractor ?: "Contractor",
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    }
+                                )
+                                DropdownMenu(
+                                    expanded = showContractorMenu,
+                                    onDismissRequest = { showContractorMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("All Contractors") },
+                                        onClick = {
+                                            onFilterContractorChange(null)
+                                            showContractorMenu = false
+                                        }
+                                    )
+                                    contractors.forEach { c ->
+                                        DropdownMenuItem(
+                                            text = { Text(c.name) },
+                                            onClick = {
+                                                onFilterContractorChange(c.name)
+                                                showContractorMenu = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Department filter dropdown chip
+                        item {
+                            Box {
+                                FilterChip(
+                                    selected = filterDepartment != null,
+                                    onClick = { showDeptMenu = true },
+                                    label = {
+                                        Text(
+                                            text = filterDepartment ?: "Dept",
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    }
+                                )
+                                DropdownMenu(
+                                    expanded = showDeptMenu,
+                                    onDismissRequest = { showDeptMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("All Departments") },
+                                        onClick = {
+                                            onFilterDepartmentChange(null)
+                                            showDeptMenu = false
+                                        }
+                                    )
+                                    departments.forEach { dept ->
+                                        DropdownMenuItem(
+                                            text = { Text(dept) },
+                                            onClick = {
+                                                onFilterDepartmentChange(dept)
+                                                showDeptMenu = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -447,7 +553,7 @@ fun RoosterScreenContent(
                     type = EmployeeTypes.LABOUR,
                     status = EmployeeStatuses.ACTIVE,
                     dateAdded = "",
-                    permanentDepartment = departments.firstOrNull() ?: "Welding Shop",
+                    permanentDepartment = "",
                     contractorId = contractors.firstOrNull()?.id,
                     contractorName = contractors.firstOrNull()?.name ?: "",
                     defaultWorkRole = roles.firstOrNull() ?: "Helper",
@@ -584,23 +690,26 @@ fun RoosterEmployeeCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = employee.permanentDepartment,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (employee.type == EmployeeTypes.STAFF && employee.designation.isNotBlank()) {
-                        Text(
-                            text = "• ${employee.designation}",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    if (employee.type == EmployeeTypes.STAFF) {
+                        if (employee.permanentDepartment.isNotBlank()) {
+                            Text(
+                                text = employee.permanentDepartment,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (employee.designation.isNotBlank()) {
+                            Text(
+                                text = "• ${employee.designation}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     } else if (employee.defaultWorkRole.isNotBlank()) {
                         Text(
-                            text = "• ${employee.defaultWorkRole}",
+                            text = employee.defaultWorkRole,
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold
@@ -785,42 +894,41 @@ fun AddEditEmployeeDialog(
                     }
                 }
 
-                // Department Dropdown
-                Column {
-                    Text("Permanent Department", style = MaterialTheme.typography.labelMedium)
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { deptExp = true },
-                        shape = RoundedCornerShape(4.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                    ) {
-                        Row(
+                // If Staff: Permanent Department & Designation
+                if (type == EmployeeTypes.STAFF) {
+                    Column {
+                        Text("Permanent Department *", style = MaterialTheme.typography.labelMedium)
+                        Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .clickable { deptExp = true },
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                         ) {
-                            Text(department.ifBlank { "Select Department" }, fontSize = 13.sp)
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                        }
-                        DropdownMenu(expanded = deptExp, onDismissRequest = { deptExp = false }) {
-                            departments.forEach { d ->
-                                DropdownMenuItem(
-                                    text = { Text(d) },
-                                    onClick = {
-                                        department = d
-                                        deptExp = false
-                                    }
-                                )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(department.ifBlank { "Select Department" }, fontSize = 13.sp)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                            DropdownMenu(expanded = deptExp, onDismissRequest = { deptExp = false }) {
+                                departments.forEach { d ->
+                                    DropdownMenuItem(
+                                        text = { Text(d) },
+                                        onClick = {
+                                            department = d
+                                            deptExp = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                // If Staff: Designation
-                if (type == EmployeeTypes.STAFF) {
                     OutlinedTextField(
                         value = designation,
                         onValueChange = { designation = it },
@@ -1050,7 +1158,7 @@ fun AddEditEmployeeDialog(
                             name = name.trim(),
                             type = type,
                             status = status,
-                            permanentDepartment = department,
+                            permanentDepartment = if (type == EmployeeTypes.STAFF) (department.ifBlank { departments.firstOrNull() ?: "" }).trim() else "",
                             designation = designation.trim(),
                             contractorName = contractorName,
                             defaultWorkRole = workRole,

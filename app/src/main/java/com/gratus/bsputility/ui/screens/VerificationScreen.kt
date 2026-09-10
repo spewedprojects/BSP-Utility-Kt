@@ -147,8 +147,7 @@ fun VerificationScreenContent(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(
-
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
@@ -167,24 +166,23 @@ fun VerificationScreenContent(
                                     fontSize = 17.sp
                                 )
                             )
+                            Spacer(modifier = Modifier.weight(1f))
+                            Badge(
+                                containerColor = if (verifiedCount == allDepts.size && allDepts.isNotEmpty()) PresentGreen else MaterialTheme.colorScheme.secondary,
+                                contentColor = if (verifiedCount == allDepts.size && allDepts.isNotEmpty()) Color.White else MaterialTheme.colorScheme.onSecondary
+                            ) {
+                                Text(
+                                    text = "$verifiedCount / ${allDepts.size}",
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Walk to each department head and confirm daily labour list before 11:00 AM",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Badge(
-                        modifier = Modifier.wrapContentWidth(),
-                        containerColor = if (verifiedCount == allDepts.size && allDepts.isNotEmpty()) PresentGreen else MaterialTheme.colorScheme.secondary,
-                        contentColor = if (verifiedCount == allDepts.size && allDepts.isNotEmpty()) Color.White else MaterialTheme.colorScheme.onSecondary
-                    ) {
-                        Text(
-                            text = "$verifiedCount / ${allDepts.size}",
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
@@ -439,7 +437,8 @@ fun DepartmentVerificationCard(
 
                     DropdownMenu(
                         expanded = staffDropdownOpen,
-                        onDismissRequest = { staffDropdownOpen = false }
+                        onDismissRequest = { staffDropdownOpen = false },
+                        shape = RoundedCornerShape(6.dp)
                     ) {
                         staffList.forEach { s ->
                             DropdownMenuItem(
@@ -477,7 +476,7 @@ fun DepartmentVerificationCard(
                             },
                             modifier = Modifier.testTag("btn_revoke_verif_$departmentName")
                         ) {
-                            Text("Revoke", fontSize = 12.sp)
+                            Text("Revoke", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
                         }
                     } else {
                         Button(

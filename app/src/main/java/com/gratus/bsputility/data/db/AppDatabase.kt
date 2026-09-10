@@ -65,38 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
             private suspend fun populateInitialData(dao: EmployeeDao) {
                 val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
-                // 1. Initial 4 Contractors
-                val c1 = Contractor(
-                    name = "Apex Industrial Services",
-                    contactPerson = "Suresh Shinde",
-                    phone = "9822011234",
-                    notes = "Supplies welders & helpers"
-                )
-                val c2 = Contractor(
-                    name = "Chakan Workforce Solutions",
-                    contactPerson = "Mahesh Gaikwad",
-                    phone = "9823055678",
-                    notes = "Laser operators and fitters"
-                )
-                val c3 = Contractor(
-                    name = "Sai Engineering Labour",
-                    contactPerson = "Vikas Jadhav",
-                    phone = "9822499102",
-                    notes = "Bending & press operators"
-                )
-                val c4 = Contractor(
-                    name = "Om Fabtech Services",
-                    contactPerson = "Santosh Kadam",
-                    phone = "9890123456",
-                    notes = "Painting & general helpers"
-                )
-
-                val c1Id = dao.insertContractor(c1)
-                val c2Id = dao.insertContractor(c2)
-                val c3Id = dao.insertContractor(c3)
-                val c4Id = dao.insertContractor(c4)
-
-                // 2. Initial Config Items
+                // 1. Initial Config Items (Always seeded for both debug and release builds)
                 val departments = listOf(
                     "Welding Shop",
                     "Laser Cutting",
@@ -170,191 +139,224 @@ abstract class AppDatabase : RoomDatabase() {
                 dao.insertConfigItems(shifts)
                 dao.insertConfigItems(customFields)
 
-                // 3. Initial Staff Employees
-                val initialStaff = listOf(
-                    Employee(
-                        name = "Rakesh Kulkarni",
-                        type = EmployeeTypes.STAFF,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "HR & Admin",
-                        designation = "HR Trainee",
-                        permanentRemarks = "Handles daily morning manpower reports"
-                    ),
-                    Employee(
-                        name = "Rajesh Patil",
-                        type = EmployeeTypes.STAFF,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Welding Shop",
-                        designation = "Department Head",
-                        permanentRemarks = "Welding section in-charge"
-                    ),
-                    Employee(
-                        name = "Anil Deshmukh",
-                        type = EmployeeTypes.STAFF,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Laser Cutting",
-                        designation = "Department Head",
-                        permanentRemarks = "Laser department supervisor"
-                    ),
-                    Employee(
-                        name = "Sunil More",
-                        type = EmployeeTypes.STAFF,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Press & Bending",
-                        designation = "Department Head",
-                        permanentRemarks = "Press shop in-charge"
-                    ),
-                    Employee(
-                        name = "Ganesh Chavan",
-                        type = EmployeeTypes.STAFF,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Paint Shop",
-                        designation = "Department Head",
-                        permanentRemarks = "Paint line supervisor"
-                    ),
-                    Employee(
-                        name = "Sachin Jagtap",
-                        type = EmployeeTypes.STAFF,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Assembly & Quality",
-                        designation = "Quality Engineer",
-                        permanentRemarks = "Final inspection"
+                // 2. Dummy Sample Dataset: Contractors and Employees (Visible in Debug builds only)
+                if (com.gratus.bsputility.BuildConfig.DEBUG) {
+                    val c1 = Contractor(
+                        name = "Apex Industrial Services",
+                        contactPerson = "Suresh Shinde",
+                        phone = "9822011234",
+                        notes = "Supplies welders & helpers"
                     )
-                )
-
-                // 4. Initial Contract Labourers
-                val initialLabourers = listOf(
-                    Employee(
-                        name = "Ramesh Pawar",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Welding Shop",
-                        contractorId = c1Id,
-                        contractorName = "Apex Industrial Services",
-                        defaultWorkRole = "Welder",
-                        defaultUnit = "Unit I",
-                        defaultShift = "Shift A"
-                    ),
-                    Employee(
-                        name = "Vijay Thorat",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Welding Shop",
-                        contractorId = c1Id,
-                        contractorName = "Apex Industrial Services",
-                        defaultWorkRole = "Helper",
-                        defaultUnit = "Unit I",
-                        defaultShift = "Shift A"
-                    ),
-                    Employee(
-                        name = "Pravin Shinde",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Laser Cutting",
-                        contractorId = c2Id,
-                        contractorName = "Chakan Workforce Solutions",
-                        defaultWorkRole = "Laser Operator",
-                        defaultUnit = "Unit I",
-                        defaultShift = "Shift A"
-                    ),
-                    Employee(
-                        name = "Dnyaneshwar Kale",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Laser Cutting",
-                        contractorId = c2Id,
-                        contractorName = "Chakan Workforce Solutions",
-                        defaultWorkRole = "Helper",
-                        defaultUnit = "Unit I",
-                        defaultShift = "Shift A"
-                    ),
-                    Employee(
-                        name = "Amol Bhosale",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Press & Bending",
-                        contractorId = c3Id,
-                        contractorName = "Sai Engineering Labour",
-                        defaultWorkRole = "Bender",
-                        defaultUnit = "Unit II",
-                        defaultShift = "Shift A"
-                    ),
-                    Employee(
-                        name = "Nitin Salunkhe",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Press & Bending",
-                        contractorId = c3Id,
-                        contractorName = "Sai Engineering Labour",
-                        defaultWorkRole = "Helper",
-                        defaultUnit = "Unit II",
-                        defaultShift = "Shift A"
-                    ),
-                    Employee(
-                        name = "Rahul Wagh",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Paint Shop",
-                        contractorId = c4Id,
-                        contractorName = "Om Fabtech Services",
-                        defaultWorkRole = "Painter",
-                        defaultUnit = "Unit II",
-                        defaultShift = "Shift B"
-                    ),
-                    Employee(
-                        name = "Deepak Kamble",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Paint Shop",
-                        contractorId = c4Id,
-                        contractorName = "Om Fabtech Services",
-                        defaultWorkRole = "Helper",
-                        defaultUnit = "Unit II",
-                        defaultShift = "Shift B"
-                    ),
-                    Employee(
-                        name = "Kishor Mane",
-                        type = EmployeeTypes.HOUSEKEEPING,
-                        status = EmployeeStatuses.ACTIVE,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Housekeeping",
-                        contractorId = c4Id,
-                        contractorName = "Om Fabtech Services",
-                        defaultWorkRole = "Housekeeping",
-                        defaultUnit = "Unit I",
-                        defaultShift = "General"
-                    ),
-                    Employee(
-                        name = "Sanjay Gade",
-                        type = EmployeeTypes.LABOUR,
-                        status = EmployeeStatuses.DEBARRED,
-                        dateAdded = todayStr,
-                        permanentDepartment = "Welding Shop",
-                        contractorId = c1Id,
-                        contractorName = "Apex Industrial Services",
-                        defaultWorkRole = "Helper",
-                        defaultUnit = "Unit I",
-                        defaultShift = "Shift A",
-                        permanentRemarks = "Safety violation - under review"
+                    val c2 = Contractor(
+                        name = "Chakan Workforce Solutions",
+                        contactPerson = "Mahesh Gaikwad",
+                        phone = "9823055678",
+                        notes = "Laser operators and fitters"
                     )
-                )
+                    val c3 = Contractor(
+                        name = "Sai Engineering Labour",
+                        contactPerson = "Vikas Jadhav",
+                        phone = "9822499102",
+                        notes = "Bending & press operators"
+                    )
+                    val c4 = Contractor(
+                        name = "Om Fabtech Services",
+                        contactPerson = "Santosh Kadam",
+                        phone = "9890123456",
+                        notes = "Painting & general helpers"
+                    )
 
-                dao.insertEmployees(initialStaff)
-                dao.insertEmployees(initialLabourers)
+                    val c1Id = dao.insertContractor(c1)
+                    val c2Id = dao.insertContractor(c2)
+                    val c3Id = dao.insertContractor(c3)
+                    val c4Id = dao.insertContractor(c4)
+
+                    // Initial Staff Employees (Permanent department belongs to staff)
+                    val initialStaff = listOf(
+                        Employee(
+                            name = "Rakesh Kulkarni",
+                            type = EmployeeTypes.STAFF,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "HR & Admin",
+                            designation = "HR Trainee",
+                            permanentRemarks = "Handles daily morning manpower reports"
+                        ),
+                        Employee(
+                            name = "Rajesh Patil",
+                            type = EmployeeTypes.STAFF,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "Welding Shop",
+                            designation = "Department Head",
+                            permanentRemarks = "Welding section in-charge"
+                        ),
+                        Employee(
+                            name = "Anil Deshmukh",
+                            type = EmployeeTypes.STAFF,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "Laser Cutting",
+                            designation = "Department Head",
+                            permanentRemarks = "Laser department supervisor"
+                        ),
+                        Employee(
+                            name = "Sunil More",
+                            type = EmployeeTypes.STAFF,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "Press & Bending",
+                            designation = "Department Head",
+                            permanentRemarks = "Press shop in-charge"
+                        ),
+                        Employee(
+                            name = "Ganesh Chavan",
+                            type = EmployeeTypes.STAFF,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "Paint Shop",
+                            designation = "Department Head",
+                            permanentRemarks = "Paint line supervisor"
+                        ),
+                        Employee(
+                            name = "Sachin Jagtap",
+                            type = EmployeeTypes.STAFF,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "Assembly & Quality",
+                            designation = "Quality Engineer",
+                            permanentRemarks = "Final inspection"
+                        )
+                    )
+
+                    // Initial Contract Labourers (No permanent department; allotted daily each morning)
+                    val initialLabourers = listOf(
+                        Employee(
+                            name = "Ramesh Pawar",
+                            type = EmployeeTypes.LABOUR,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c1Id,
+                            contractorName = "Apex Industrial Services",
+                            defaultWorkRole = "Welder",
+                            defaultUnit = "Unit I",
+                            defaultShift = "Shift A"
+                        ),
+                        Employee(
+                            name = "Vijay Thorat",
+                            type = EmployeeTypes.LABOUR,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c1Id,
+                            contractorName = "Apex Industrial Services",
+                            defaultWorkRole = "Helper",
+                            defaultUnit = "Unit I",
+                            defaultShift = "Shift A"
+                        ),
+                        Employee(
+                            name = "Pravin Shinde",
+                            type = EmployeeTypes.LABOUR,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c2Id,
+                            contractorName = "Chakan Workforce Solutions",
+                            defaultWorkRole = "Laser Operator",
+                            defaultUnit = "Unit I",
+                            defaultShift = "Shift A"
+                        ),
+                        Employee(
+                            name = "Dnyaneshwar Kale",
+                            type = EmployeeTypes.LABOUR,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c2Id,
+                            contractorName = "Chakan Workforce Solutions",
+                            defaultWorkRole = "Helper",
+                            defaultUnit = "Unit I",
+                            defaultShift = "Shift A"
+                        ),
+                        Employee(
+                            name = "Amol Bhosale",
+                            type = EmployeeTypes.LABOUR,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c3Id,
+                            contractorName = "Sai Engineering Labour",
+                            defaultWorkRole = "Bender",
+                            defaultUnit = "Unit II",
+                            defaultShift = "Shift A"
+                        ),
+                        Employee(
+                            name = "Nitin Salunkhe",
+                            type = EmployeeTypes.LABOUR,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c3Id,
+                            contractorName = "Sai Engineering Labour",
+                            defaultWorkRole = "Helper",
+                            defaultUnit = "Unit II",
+                            defaultShift = "Shift A"
+                        ),
+                        Employee(
+                            name = "Rahul Wagh",
+                            type = EmployeeTypes.LABOUR,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c4Id,
+                            contractorName = "Om Fabtech Services",
+                            defaultWorkRole = "Painter",
+                            defaultUnit = "Unit II",
+                            defaultShift = "Shift B"
+                        ),
+                        Employee(
+                            name = "Deepak Kamble",
+                            type = EmployeeTypes.LABOUR,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c4Id,
+                            contractorName = "Om Fabtech Services",
+                            defaultWorkRole = "Helper",
+                            defaultUnit = "Unit II",
+                            defaultShift = "Shift B"
+                        ),
+                        Employee(
+                            name = "Kishor Mane",
+                            type = EmployeeTypes.HOUSEKEEPING,
+                            status = EmployeeStatuses.ACTIVE,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c4Id,
+                            contractorName = "Om Fabtech Services",
+                            defaultWorkRole = "Housekeeping",
+                            defaultUnit = "Unit I",
+                            defaultShift = "General"
+                        ),
+                        Employee(
+                            name = "Sanjay Gade",
+                            type = EmployeeTypes.LABOUR,
+                            status = EmployeeStatuses.DEBARRED,
+                            dateAdded = todayStr,
+                            permanentDepartment = "",
+                            contractorId = c1Id,
+                            contractorName = "Apex Industrial Services",
+                            defaultWorkRole = "Helper",
+                            defaultUnit = "Unit I",
+                            defaultShift = "Shift A",
+                            permanentRemarks = "Safety violation - under review"
+                        )
+                    )
+
+                    dao.insertEmployees(initialStaff)
+                    dao.insertEmployees(initialLabourers)
+                }
             }
         }
     }
