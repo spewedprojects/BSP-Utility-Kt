@@ -1,5 +1,6 @@
 package com.gratus.bsputility.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -55,22 +56,27 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gratus.bsputility.data.models.Contractor
+import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
+import com.gratus.bsputility.data.models.ManpowerSummary
 import com.gratus.bsputility.ui.components.AttendanceLabourDialog
 import com.gratus.bsputility.ui.components.AttendanceStaffDialog
 import com.gratus.bsputility.ui.components.StatusBadge
+import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
+import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import com.gratus.bsputility.ui.theme.PresentGreen
 import com.gratus.bsputility.ui.theme.PresentGreenLight
 import com.gratus.bsputility.ui.theme.StatusDebarred
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 import kotlin.collections.forEach
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AttendanceScreen(
     viewModel: ManpowerViewModel,
@@ -86,9 +92,6 @@ fun AttendanceScreen(
     val filterContractor by viewModel.attendanceFilterContractor.collectAsStateWithLifecycle()
     val filterDepartment by viewModel.attendanceFilterDepartment.collectAsStateWithLifecycle()
 
-    // Dialog state
-    var selectedItemForDialog by remember { mutableStateOf<ManpowerViewModel.EmployeeAttendanceItem?>(null) }
-
     val departments = remember(configItems) {
         configItems.filter { it.category == "DEPARTMENT" }.map { it.name }
     }
@@ -99,6 +102,76 @@ fun AttendanceScreen(
         configItems.filter { it.category == "UNIT" }.map { it.name }
     }
 
+    AttendanceScreenContent(
+        items = items,
+        summary = summary,
+        contractors = contractors,
+        departments = departments,
+        roles = roles,
+        units = units,
+        searchQuery = searchQuery,
+        onSearchQueryChange = { viewModel.attendanceSearchQuery.value = it },
+        filterType = filterType,
+        onFilterTypeChange = { viewModel.attendanceFilterType.value = it },
+        filterContractor = filterContractor,
+        onFilterContractorChange = { viewModel.attendanceFilterContractor.value = it },
+        filterDepartment = filterDepartment,
+        onFilterDepartmentChange = { viewModel.attendanceFilterDepartment.value = it },
+        onMarkAllPresent = { viewModel.markAllActivePresent() },
+        onTogglePresence = { viewModel.toggleAttendance(it) },
+        onSaveStaffAttendance = { emp, isPresent, time, remarks ->
+            viewModel.updateStaffDailyAttendance(emp, isPresent, time, remarks)
+        },
+        onSaveLabourAssignment = { emp, isPresent, dept, role, contractor, unit, shift, remarks ->
+            viewModel.updateLabourDailyAssignment(
+                employee = emp,
+                isPresent = isPresent,
+                department = dept,
+                workRole = role,
+                contractor = contractor,
+                unit = unit,
+                shift = shift,
+                remarks = remarks
+            )
+        },
+        modifier = modifier
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AttendanceScreenContent(
+    items: List<ManpowerViewModel.EmployeeAttendanceItem>,
+    summary: ManpowerSummary,
+    contractors: List<Contractor>,
+    departments: List<String>,
+    roles: List<String>,
+    units: List<String>,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    filterType: String,
+    onFilterTypeChange: (String) -> Unit,
+    filterContractor: String?,
+    onFilterContractorChange: (String?) -> Unit,
+    filterDepartment: String?,
+    onFilterDepartmentChange: (String?) -> Unit,
+    onMarkAllPresent: () -> Unit,
+    onTogglePresence: (ManpowerViewModel.EmployeeAttendanceItem) -> Unit,
+    onSaveStaffAttendance: (employee: Employee, isPresent: Boolean, time: String, remarks: String) -> Unit,
+    onSaveLabourAssignment: (
+        employee: Employee,
+        isPresent: Boolean,
+        department: String,
+        workRole: String,
+        contractor: String,
+        unit: String,
+        shift: String,
+        remarks: String
+    ) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Dialog state
+    var selectedItemForDialog by remember { mutableStateOf<ManpowerViewModel.EmployeeAttendanceItem?>(null) }
     var showContractorMenu by remember { mutableStateOf(false) }
     var showDeptMenu by remember { mutableStateOf(false) }
 
@@ -146,7 +219,7 @@ fun AttendanceScreen(
                 }
 
                 OutlinedButton(
-                    onClick = { viewModel.markAllActivePresent() },
+                    onClick = onMarkAllPresent,
                     modifier = Modifier.testTag("btn_mark_all_present")
                 ) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -165,14 +238,14 @@ fun AttendanceScreen(
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 OutlinedTextField(
                     value = searchQuery,
-                    onValueChange = { viewModel.attendanceSearchQuery.value = it },
+                    onValueChange = onSearchQueryChange,
                     placeholder = { Text("Who's where? Search name, dept, role, contractor...") },
                     leadingIcon = {
                         Icon(Icons.Default.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary)
                     },
                     trailingIcon = {
                         if (searchQuery.isNotBlank()) {
-                            IconButton(onClick = { viewModel.attendanceSearchQuery.value = "" }) {
+                            IconButton(onClick = { onSearchQueryChange("") }) {
                                 Icon(Icons.Default.Clear, contentDescription = "Clear")
                             }
                         }
@@ -200,7 +273,7 @@ fun AttendanceScreen(
                     items(filterChips) { filter ->
                         FilterChip(
                             selected = filterType == filter,
-                            onClick = { viewModel.attendanceFilterType.value = filter },
+                            onClick = { onFilterTypeChange(filter) },
                             label = { Text(filter, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
                             modifier = Modifier.testTag("filter_chip_$filter")
                         )
@@ -231,7 +304,7 @@ fun AttendanceScreen(
                                 DropdownMenuItem(
                                     text = { Text("All Contractors") },
                                     onClick = {
-                                        viewModel.attendanceFilterContractor.value = null
+                                        onFilterContractorChange(null)
                                         showContractorMenu = false
                                     }
                                 )
@@ -239,7 +312,7 @@ fun AttendanceScreen(
                                     DropdownMenuItem(
                                         text = { Text(c.name) },
                                         onClick = {
-                                            viewModel.attendanceFilterContractor.value = c.name
+                                            onFilterContractorChange(c.name)
                                             showContractorMenu = false
                                         }
                                     )
@@ -270,7 +343,7 @@ fun AttendanceScreen(
                                 DropdownMenuItem(
                                     text = { Text("All Departments") },
                                     onClick = {
-                                        viewModel.attendanceFilterDepartment.value = null
+                                        onFilterDepartmentChange(null)
                                         showDeptMenu = false
                                     }
                                 )
@@ -278,7 +351,7 @@ fun AttendanceScreen(
                                     DropdownMenuItem(
                                         text = { Text(dept) },
                                         onClick = {
-                                            viewModel.attendanceFilterDepartment.value = dept
+                                            onFilterDepartmentChange(dept)
                                             showDeptMenu = false
                                         }
                                     )
@@ -323,12 +396,12 @@ fun AttendanceScreen(
                 items(items, key = { it.employee.id }) { item ->
                     AttendanceCard(
                         item = item,
-                        onTogglePresence = { viewModel.toggleAttendance(item) },
+                        onTogglePresence = { onTogglePresence(item) },
                         onEditDetails = { selectedItemForDialog = item }
                     )
                 }
                 item {
-                    Spacer(modifier = Modifier.height(80.dp)) // Extra scroll padding for navigation bar
+                    Spacer(modifier = Modifier.height(80.dp))
                 }
             }
         }
@@ -344,7 +417,7 @@ fun AttendanceScreen(
                 currentRemarks = item.dayRemarks,
                 onDismiss = { selectedItemForDialog = null },
                 onSave = { isPresent, time, remarks ->
-                    viewModel.updateStaffDailyAttendance(item.employee, isPresent, time, remarks)
+                    onSaveStaffAttendance(item.employee, isPresent, time, remarks)
                     selectedItemForDialog = null
                 }
             )
@@ -364,15 +437,15 @@ fun AttendanceScreen(
                 availableUnits = units,
                 onDismiss = { selectedItemForDialog = null },
                 onSave = { isPresent, dept, role, contractor, unit, shift, remarks ->
-                    viewModel.updateLabourDailyAssignment(
-                        employee = item.employee,
-                        isPresent = isPresent,
-                        department = dept,
-                        workRole = role,
-                        contractor = contractor,
-                        unit = unit,
-                        shift = shift,
-                        remarks = remarks
+                    onSaveLabourAssignment(
+                        item.employee,
+                        isPresent,
+                        dept,
+                        role,
+                        contractor,
+                        unit,
+                        shift,
+                        remarks
                     )
                     selectedItemForDialog = null
                 }
@@ -385,13 +458,14 @@ fun AttendanceScreen(
 fun AttendanceCard(
     item: ManpowerViewModel.EmployeeAttendanceItem,
     onTogglePresence: () -> Unit,
-    onEditDetails: () -> Unit
+    onEditDetails: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val emp = item.employee
     val isDebarred = emp.status == EmployeeStatuses.DEBARRED
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .clickable { onEditDetails() }
@@ -399,7 +473,7 @@ fun AttendanceCard(
         colors = CardDefaults.cardColors(
             containerColor = if (item.isPresent) PresentGreenLight.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (item.isPresent) 2.dp else 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (item.isPresent) 0.dp else 0.dp),
         border = BorderStroke(
             1.dp,
             if (isDebarred) StatusDebarred
@@ -474,7 +548,7 @@ fun AttendanceCard(
                     Text(
                         text = "Contractor: ${item.effectiveContractor}",
                         fontSize = 11.sp,
-                        color = IndustrialAmber600,
+                        color = MaterialTheme.colorScheme.secondary,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -551,5 +625,194 @@ fun AttendanceCard(
                 }
             }
         }
+    }
+}
+
+// ==========================================
+// PREVIEWS - ALL STATES
+// ==========================================
+
+@Preview(name = "Attendance Screen - Populated / Default", showBackground = true)
+@Composable
+fun AttendanceScreenPreview_Default() {
+    MyApplicationTheme(darkTheme = false) {
+        AttendanceScreenContent(
+            items = PreviewData.sampleAttendanceItems,
+            summary = PreviewData.sampleSummary,
+            contractors = PreviewData.sampleContractors,
+            departments = listOf("Laser Cutting", "Fabrication", "Welding Shop", "Press Shop"),
+            roles = listOf("Helper", "Welder", "Operator", "Laser Operator", "Fitter"),
+            units = listOf("Unit I", "Unit II", "Unit III"),
+            searchQuery = "",
+            onSearchQueryChange = {},
+            filterType = "All",
+            onFilterTypeChange = {},
+            filterContractor = null,
+            onFilterContractorChange = {},
+            filterDepartment = null,
+            onFilterDepartmentChange = {},
+            onMarkAllPresent = {},
+            onTogglePresence = {},
+            onSaveStaffAttendance = { _, _, _, _ -> },
+            onSaveLabourAssignment = { _, _, _, _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Attendance Screen - Dark Theme", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun AttendanceScreenPreview_DarkTheme() {
+    MyApplicationTheme(darkTheme = true) {
+        AttendanceScreenContent(
+            items = PreviewData.sampleAttendanceItems,
+            summary = PreviewData.sampleSummary,
+            contractors = PreviewData.sampleContractors,
+            departments = listOf("Laser Cutting", "Fabrication", "Welding Shop", "Press Shop"),
+            roles = listOf("Helper", "Welder", "Operator", "Laser Operator", "Fitter"),
+            units = listOf("Unit I", "Unit II", "Unit III"),
+            searchQuery = "",
+            onSearchQueryChange = {},
+            filterType = "All",
+            onFilterTypeChange = {},
+            filterContractor = null,
+            onFilterContractorChange = {},
+            filterDepartment = null,
+            onFilterDepartmentChange = {},
+            onMarkAllPresent = {},
+            onTogglePresence = {},
+            onSaveStaffAttendance = { _, _, _, _ -> },
+            onSaveLabourAssignment = { _, _, _, _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Attendance Screen - Filtered (Labour Only)", showBackground = true)
+@Composable
+fun AttendanceScreenPreview_Filtered() {
+    val filtered = PreviewData.sampleAttendanceItems.filter { it.employee.type == EmployeeTypes.LABOUR }
+    MyApplicationTheme {
+        AttendanceScreenContent(
+            items = filtered,
+            summary = PreviewData.sampleSummary,
+            contractors = PreviewData.sampleContractors,
+            departments = listOf("Laser Cutting", "Fabrication", "Welding Shop", "Press Shop"),
+            roles = listOf("Helper", "Welder", "Operator", "Laser Operator", "Fitter"),
+            units = listOf("Unit I", "Unit II", "Unit III"),
+            searchQuery = "Welding",
+            onSearchQueryChange = {},
+            filterType = "Labour",
+            onFilterTypeChange = {},
+            filterContractor = "Om Sai Enterprises",
+            onFilterContractorChange = {},
+            filterDepartment = null,
+            onFilterDepartmentChange = {},
+            onMarkAllPresent = {},
+            onTogglePresence = {},
+            onSaveStaffAttendance = { _, _, _, _ -> },
+            onSaveLabourAssignment = { _, _, _, _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Attendance Screen - Empty Search Results", showBackground = true)
+@Composable
+fun AttendanceScreenPreview_Empty() {
+    MyApplicationTheme {
+        AttendanceScreenContent(
+            items = emptyList(),
+            summary = PreviewData.sampleSummary.copy(grandTotalPresent = 0, totalStaffPresent = 0, totalLabourersPresent = 0),
+            contractors = PreviewData.sampleContractors,
+            departments = listOf("Laser Cutting", "Fabrication"),
+            roles = listOf("Helper", "Welder"),
+            units = listOf("Unit I", "Unit II"),
+            searchQuery = "NonExistentEmployee",
+            onSearchQueryChange = {},
+            filterType = "All",
+            onFilterTypeChange = {},
+            filterContractor = null,
+            onFilterContractorChange = {},
+            filterDepartment = null,
+            onFilterDepartmentChange = {},
+            onMarkAllPresent = {},
+            onTogglePresence = {},
+            onSaveStaffAttendance = { _, _, _, _ -> },
+            onSaveLabourAssignment = { _, _, _, _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Attendance Cards - Various States", showBackground = true)
+@Composable
+fun AttendanceCards_Preview() {
+    MyApplicationTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // 1. Present Labour Card
+            AttendanceCard(
+                item = PreviewData.sampleAttendanceItems[3],
+                onTogglePresence = {},
+                onEditDetails = {}
+            )
+            // 2. Absent Labour Card
+            AttendanceCard(
+                item = PreviewData.sampleAttendanceItems[5],
+                onTogglePresence = {},
+                onEditDetails = {}
+            )
+            // 3. Present Staff Card (with time & designation)
+            AttendanceCard(
+                item = PreviewData.sampleAttendanceItems[1],
+                onTogglePresence = {},
+                onEditDetails = {}
+            )
+            // 4. Debarred Employee Card
+            AttendanceCard(
+                item = PreviewData.sampleAttendanceItems[6],
+                onTogglePresence = {},
+                onEditDetails = {}
+            )
+        }
+    }
+}
+
+@Preview(name = "Attendance Dialog - Labour Daily Assignment", showBackground = true)
+@Composable
+fun AttendanceLabourDialog_Preview() {
+    MyApplicationTheme {
+        AttendanceLabourDialog(
+            employee = PreviewData.sampleEmployees[3],
+            currentPresence = true,
+            currentDepartment = "Welding Shop",
+            currentWorkRole = "Welder",
+            currentContractor = "Om Sai Enterprises",
+            currentUnit = "Unit I",
+            currentShift = "Shift A",
+            currentRemarks = "Line 1 welding job",
+            availableDepartments = listOf("Laser Cutting", "Fabrication", "Welding Shop", "Press Shop"),
+            availableRoles = listOf("Helper", "Welder", "Operator", "Fitter"),
+            availableContractors = PreviewData.sampleContractors,
+            availableUnits = listOf("Unit I", "Unit II", "Unit III"),
+            onDismiss = {},
+            onSave = { _, _, _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Attendance Dialog - Staff Attendance", showBackground = true)
+@Composable
+fun AttendanceStaffDialog_Preview() {
+    MyApplicationTheme {
+        AttendanceStaffDialog(
+            employee = PreviewData.sampleEmployees[0],
+            currentPresence = true,
+            currentTime = "08:45 AM",
+            currentRemarks = "Morning production review",
+            onDismiss = {},
+            onSave = { _, _, _ -> }
+        )
     }
 }

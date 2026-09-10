@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -50,11 +51,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gratus.bsputility.data.models.DepartmentVerification
+import com.gratus.bsputility.data.models.ManpowerSummary
+import com.gratus.bsputility.ui.preview.PreviewData
+import com.gratus.bsputility.ui.theme.IndustrialAmber500
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
 import com.gratus.bsputility.ui.theme.IndustrialNavy900
+import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import com.gratus.bsputility.ui.theme.PresentGreen
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 
@@ -68,6 +75,52 @@ fun ReportsScreen(
     val date by viewModel.selectedDate.collectAsStateWithLifecycle()
     val verifications by viewModel.verificationRecords.collectAsStateWithLifecycle()
 
+    ReportsScreenContent(
+        summary = summary,
+        date = date,
+        verifications = verifications,
+        onCopyWhatsAppReport = {
+            val reportText = viewModel.generateMorningReportWhatsApp()
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Morning Manpower Report", reportText))
+            Toast.makeText(context, "Copied Morning Report to Clipboard!", Toast.LENGTH_SHORT).show()
+        },
+        onShareWhatsAppReport = {
+            val reportText = viewModel.generateMorningReportWhatsApp()
+            val sendIntent = Intent().apply {
+                action = Intent.ACTION_SEND
+                putExtra(Intent.EXTRA_TEXT, reportText)
+                type = "text/plain"
+            }
+            context.startActivity(Intent.createChooser(sendIntent, "Share Manpower Report"))
+        },
+        onCopySummaryCsv = {
+            val csv = viewModel.generateSummaryCsv()
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Summary CSV", csv))
+            Toast.makeText(context, "Summary CSV copied to clipboard", Toast.LENGTH_SHORT).show()
+        },
+        onCopyDetailedCsv = {
+            val csv = viewModel.generateDetailedCsv()
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Detailed Attendance CSV", csv))
+            Toast.makeText(context, "Detailed CSV copied to clipboard", Toast.LENGTH_SHORT).show()
+        },
+        modifier = modifier
+    )
+}
+
+@Composable
+fun ReportsScreenContent(
+    summary: ManpowerSummary,
+    date: String,
+    verifications: List<DepartmentVerification>,
+    onCopyWhatsAppReport: () -> Unit,
+    onShareWhatsAppReport: () -> Unit,
+    onCopySummaryCsv: () -> Unit,
+    onCopyDetailedCsv: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -88,7 +141,7 @@ fun ReportsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Row(modifier = Modifier.align(Alignment.CenterVertically)) {
                         Text(
                             text = "BSP METATECH LLP, CHAKAN",
                             fontSize = 11.sp,
@@ -96,27 +149,26 @@ fun ReportsScreen(
                             color = IndustrialAmber600,
                             letterSpacing = 1.sp
                         )
-                        Text(
-                            text = "Morning Manpower Summary",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color.White.copy(alpha = 0.15f)
-                    ) {
-                        Text(
-                            text = date,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color.White.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = date,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
+                Text(
+                    text = "Morning Manpower Summary",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
 
                 Spacer(modifier = Modifier.height(14.dp))
 
@@ -147,16 +199,14 @@ fun ReportsScreen(
 
                 // Copy WhatsApp Report Button
                 Button(
-                    onClick = {
-                        val reportText = viewModel.generateMorningReportWhatsApp()
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("Morning Manpower Report", reportText))
-                        Toast.makeText(context, "Copied Morning Report to Clipboard!", Toast.LENGTH_SHORT).show()
-                    },
+                    onClick = onCopyWhatsAppReport,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("btn_copy_morning_report"),
-                    colors = ButtonDefaults.buttonColors(containerColor = IndustrialAmber600)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary
+                    )
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -165,15 +215,7 @@ fun ReportsScreen(
 
                 // Share Intent
                 OutlinedButton(
-                    onClick = {
-                        val reportText = viewModel.generateMorningReportWhatsApp()
-                        val sendIntent = Intent().apply {
-                            action = Intent.ACTION_SEND
-                            putExtra(Intent.EXTRA_TEXT, reportText)
-                            type = "text/plain"
-                        }
-                        context.startActivity(Intent.createChooser(sendIntent, "Share Manpower Report"))
-                    },
+                    onClick = onShareWhatsAppReport,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -186,12 +228,7 @@ fun ReportsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
-                        onClick = {
-                            val csv = viewModel.generateSummaryCsv()
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Summary CSV", csv))
-                            Toast.makeText(context, "Summary CSV copied to clipboard", Toast.LENGTH_SHORT).show()
-                        },
+                        onClick = onCopySummaryCsv,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -200,12 +237,7 @@ fun ReportsScreen(
                     }
 
                     OutlinedButton(
-                        onClick = {
-                            val csv = viewModel.generateDetailedCsv()
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Detailed Attendance CSV", csv))
-                            Toast.makeText(context, "Detailed CSV copied to clipboard", Toast.LENGTH_SHORT).show()
-                        },
+                        onClick = onCopyDetailedCsv,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -317,7 +349,7 @@ fun MetricCounter(label: String, value: String, highlight: Boolean = false) {
         Text(
             text = label,
             fontSize = 11.sp,
-            color = if (highlight) IndustrialAmber600 else Color.White.copy(alpha = 0.7f),
+            color = if (highlight) IndustrialAmber500 else Color.White.copy(alpha = 0.7f),
             fontWeight = FontWeight.Medium
         )
         Text(
@@ -334,10 +366,11 @@ fun BreakdownCard(
     title: String,
     icon: ImageVector,
     counts: Map<String, Int>,
-    emptyMessage: String
+    emptyMessage: String,
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(10.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -389,6 +422,87 @@ fun BreakdownCard(
                     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                 }
             }
+        }
+    }
+}
+
+// ==========================================
+// PREVIEWS - ALL STATES
+// ==========================================
+
+@Preview(name = "Reports Screen - Default Populated", showBackground = true)
+@Composable
+fun ReportsScreenPreview_Default() {
+    MyApplicationTheme(darkTheme = false) {
+        ReportsScreenContent(
+            summary = PreviewData.sampleSummary,
+            date = "2026-09-10",
+            verifications = PreviewData.sampleVerifications,
+            onCopyWhatsAppReport = {},
+            onShareWhatsAppReport = {},
+            onCopySummaryCsv = {},
+            onCopyDetailedCsv = {}
+        )
+    }
+}
+
+@Preview(name = "Reports Screen - Dark Theme", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun ReportsScreenPreview_DarkTheme() {
+    MyApplicationTheme(darkTheme = true) {
+        ReportsScreenContent(
+            summary = PreviewData.sampleSummary,
+            date = "2026-09-10",
+            verifications = PreviewData.sampleVerifications,
+            onCopyWhatsAppReport = {},
+            onShareWhatsAppReport = {},
+            onCopySummaryCsv = {},
+            onCopyDetailedCsv = {}
+        )
+    }
+}
+
+@Preview(name = "Reports Screen - Initial / Empty State", showBackground = true)
+@Composable
+fun ReportsScreenPreview_Empty() {
+    MyApplicationTheme {
+        ReportsScreenContent(
+            summary = ManpowerSummary(),
+            date = "2026-09-10",
+            verifications = emptyList(),
+            onCopyWhatsAppReport = {},
+            onShareWhatsAppReport = {},
+            onCopySummaryCsv = {},
+            onCopyDetailedCsv = {}
+        )
+    }
+}
+
+@Preview(name = "Reports Breakdown Cards - Various Types", showBackground = true)
+@Composable
+fun ReportsBreakdownCards_Preview() {
+    MyApplicationTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Populated Breakdown
+            BreakdownCard(
+                title = "Contractor-wise Labour Count",
+                icon = Icons.Default.Business,
+                counts = mapOf("Om Sai Enterprises" to 12, "Shree Ganesh Manpower" to 8),
+                emptyMessage = "No data"
+            )
+
+            // Empty Breakdown
+            BreakdownCard(
+                title = "Contractor-wise Labour Count (Empty)",
+                icon = Icons.Default.Business,
+                counts = emptyMap(),
+                emptyMessage = "No contractor labourers marked present today"
+            )
         }
     }
 }

@@ -3,11 +3,13 @@ package com.gratus.bsputility.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
@@ -68,6 +71,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -77,17 +81,17 @@ import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
 import com.gratus.bsputility.ui.components.CollapsibleSection
 import com.gratus.bsputility.ui.components.StatusBadge
+import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
 import com.gratus.bsputility.ui.theme.IndustrialNavy900
+import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoosterScreen(
     viewModel: ManpowerViewModel,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val allEmployees by viewModel.allEmployees.collectAsStateWithLifecycle()
     val contractors by viewModel.allContractors.collectAsStateWithLifecycle()
     val configItems by viewModel.allConfigItems.collectAsStateWithLifecycle()
@@ -108,6 +112,65 @@ fun RoosterScreen(
     val units = remember(configItems) {
         configItems.filter { it.category == "UNIT" }.map { it.name }
     }
+
+    RoosterScreenContent(
+        allEmployees = allEmployees,
+        contractors = contractors,
+        departments = departments,
+        roles = roles,
+        designations = designations,
+        units = units,
+        searchQuery = searchQuery,
+        onSearchQueryChange = { viewModel.roosterSearchQuery.value = it },
+        filterStatus = filterStatus,
+        onFilterStatusChange = { viewModel.roosterFilterStatus.value = it },
+        collapsedGroups = collapsedGroups,
+        onToggleCollapse = { viewModel.toggleCategoryCollapse(it) },
+        onAddEmployee = { viewModel.addEmployee(it) },
+        onUpdateEmployee = { viewModel.updateEmployee(it) },
+        onDeleteEmployee = { viewModel.deleteEmployee(it) },
+        onImportPastedNames = { namesText, targetType, contractorId, contractorName, dept, role ->
+            viewModel.importPastedNames(namesText, targetType, contractorId, contractorName, dept, role)
+        },
+        onExportJson = { viewModel.exportAllDataJson() },
+        onExportCsv = { viewModel.generateRoosterCsv() },
+        onImportJson = { viewModel.importAllDataJson(it) },
+        modifier = modifier
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RoosterScreenContent(
+    allEmployees: List<Employee>,
+    contractors: List<Contractor>,
+    departments: List<String>,
+    roles: List<String>,
+    designations: List<String>,
+    units: List<String>,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    filterStatus: String,
+    onFilterStatusChange: (String) -> Unit,
+    collapsedGroups: Map<String, Boolean>,
+    onToggleCollapse: (String) -> Unit,
+    onAddEmployee: (Employee) -> Unit,
+    onUpdateEmployee: (Employee) -> Unit,
+    onDeleteEmployee: (Employee) -> Unit,
+    onImportPastedNames: (
+        namesText: String,
+        targetType: String,
+        contractorId: Long?,
+        contractorName: String,
+        dept: String,
+        role: String
+    ) -> Int,
+    onExportJson: () -> String,
+    onExportCsv: () -> String,
+    onImportJson: (String) -> Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
 
     // Modals
     var showAddEditDialog by remember { mutableStateOf<Employee?>(null) }
@@ -164,7 +227,6 @@ fun RoosterScreen(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier
-                    .padding(bottom = 64.dp)
                     .testTag("fab_add_employee")
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add Employee")
@@ -230,12 +292,12 @@ fun RoosterScreen(
                     // Search Input
                     OutlinedTextField(
                         value = searchQuery,
-                        onValueChange = { viewModel.roosterSearchQuery.value = it },
+                        onValueChange = onSearchQueryChange,
                         placeholder = { Text("Search library by name, dept, contractor...") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         trailingIcon = {
                             if (searchQuery.isNotBlank()) {
-                                IconButton(onClick = { viewModel.roosterSearchQuery.value = "" }) {
+                                IconButton(onClick = { onSearchQueryChange("") }) {
                                     Icon(Icons.Default.Clear, contentDescription = "Clear")
                                 }
                             }
@@ -258,7 +320,7 @@ fun RoosterScreen(
                         items(filters) { f ->
                             FilterChip(
                                 selected = filterStatus == f,
-                                onClick = { viewModel.roosterFilterStatus.value = f },
+                                onClick = { onFilterStatusChange(f) },
                                 label = { Text(f, fontSize = 12.sp) }
                             )
                         }
@@ -266,99 +328,123 @@ fun RoosterScreen(
                 }
             }
 
-            // Employee List with Collapsible Groups
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // 1. Staff Section
-                if (staffList.isNotEmpty()) {
-                    item {
-                        val isExpanded = !(collapsedGroups["STAFF"] ?: false)
-                        CollapsibleSection(
-                            title = "Staff Members",
-                            count = staffList.size,
-                            isExpanded = isExpanded,
-                            onToggle = { viewModel.toggleCategoryCollapse("STAFF") },
-                            leadingIcon = Icons.Default.Badge,
-                            iconTint = IndustrialNavy900
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                staffList.forEach { emp ->
-                                    RoosterEmployeeCard(
-                                        employee = emp,
-                                        onEdit = {
-                                            isCreatingNew = false
-                                            showAddEditDialog = emp
-                                        },
-                                        onDelete = { showDeleteConfirmDialog = emp }
-                                    )
+            if (filteredEmployees.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "No employees found matching filter.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                // Employee List with Collapsible Groups
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // 1. Staff Section
+                    if (staffList.isNotEmpty()) {
+                        item {
+                            val isExpanded = !(collapsedGroups["STAFF"] ?: false)
+                            CollapsibleSection(
+                                title = "Staff Members",
+                                count = staffList.size,
+                                isExpanded = isExpanded,
+                                onToggle = { onToggleCollapse("STAFF") },
+                                leadingIcon = Icons.Default.Badge,
+                                iconTint = MaterialTheme.colorScheme.primary
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    staffList.forEach { emp ->
+                                        RoosterEmployeeCard(
+                                            employee = emp,
+                                            onEdit = {
+                                                isCreatingNew = false
+                                                showAddEditDialog = emp
+                                            },
+                                            onDelete = { showDeleteConfirmDialog = emp }
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // 2. Contract Labour Section
-                if (labourList.isNotEmpty()) {
-                    item {
-                        val isExpanded = !(collapsedGroups["LABOUR"] ?: false)
-                        CollapsibleSection(
-                            title = "Contract Labourers",
-                            count = labourList.size,
-                            isExpanded = isExpanded,
-                            onToggle = { viewModel.toggleCategoryCollapse("LABOUR") },
-                            leadingIcon = Icons.Default.Engineering,
-                            iconTint = IndustrialAmber600
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                labourList.forEach { emp ->
-                                    RoosterEmployeeCard(
-                                        employee = emp,
-                                        onEdit = {
-                                            isCreatingNew = false
-                                            showAddEditDialog = emp
-                                        },
-                                        onDelete = { showDeleteConfirmDialog = emp }
-                                    )
+                    // 2. Contract Labour Section
+                    if (labourList.isNotEmpty()) {
+                        item {
+                            val isExpanded = !(collapsedGroups["LABOUR"] ?: false)
+                            CollapsibleSection(
+                                title = "Contract Labourers",
+                                count = labourList.size,
+                                isExpanded = isExpanded,
+                                onToggle = { onToggleCollapse("LABOUR") },
+                                leadingIcon = Icons.Default.Engineering,
+                                iconTint = MaterialTheme.colorScheme.secondary
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    labourList.forEach { emp ->
+                                        RoosterEmployeeCard(
+                                            employee = emp,
+                                            onEdit = {
+                                                isCreatingNew = false
+                                                showAddEditDialog = emp
+                                            },
+                                            onDelete = { showDeleteConfirmDialog = emp }
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // 3. Housekeeping Section
-                if (hkList.isNotEmpty()) {
-                    item {
-                        val isExpanded = !(collapsedGroups["HOUSEKEEPING"] ?: false)
-                        CollapsibleSection(
-                            title = "Housekeeping Staff",
-                            count = hkList.size,
-                            isExpanded = isExpanded,
-                            onToggle = { viewModel.toggleCategoryCollapse("HOUSEKEEPING") },
-                            leadingIcon = Icons.Default.Group,
-                            iconTint = MaterialTheme.colorScheme.tertiary
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                hkList.forEach { emp ->
-                                    RoosterEmployeeCard(
-                                        employee = emp,
-                                        onEdit = {
-                                            isCreatingNew = false
-                                            showAddEditDialog = emp
-                                        },
-                                        onDelete = { showDeleteConfirmDialog = emp }
-                                    )
+                    // 3. Housekeeping Section
+                    if (hkList.isNotEmpty()) {
+                        item {
+                            val isExpanded = !(collapsedGroups["HOUSEKEEPING"] ?: false)
+                            CollapsibleSection(
+                                title = "Housekeeping Staff",
+                                count = hkList.size,
+                                isExpanded = isExpanded,
+                                onToggle = { onToggleCollapse("HOUSEKEEPING") },
+                                leadingIcon = Icons.Default.Group,
+                                iconTint = MaterialTheme.colorScheme.tertiary
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    hkList.forEach { emp ->
+                                        RoosterEmployeeCard(
+                                            employee = emp,
+                                            onEdit = {
+                                                isCreatingNew = false
+                                                showAddEditDialog = emp
+                                            },
+                                            onDelete = { showDeleteConfirmDialog = emp }
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                item {
-                    Spacer(modifier = Modifier.height(100.dp))
+                    item {
+                        Spacer(modifier = Modifier.height(100.dp))
+                    }
                 }
             }
         }
@@ -377,10 +463,10 @@ fun RoosterScreen(
             onDismiss = { showAddEditDialog = null },
             onSave = { updated ->
                 if (isCreatingNew) {
-                    viewModel.addEmployee(updated)
+                    onAddEmployee(updated)
                     Toast.makeText(context, "Added ${updated.name} to library", Toast.LENGTH_SHORT).show()
                 } else {
-                    viewModel.updateEmployee(updated)
+                    onUpdateEmployee(updated)
                     Toast.makeText(context, "Updated ${updated.name}", Toast.LENGTH_SHORT).show()
                 }
                 showAddEditDialog = null
@@ -396,7 +482,7 @@ fun RoosterScreen(
             roles = roles,
             onDismiss = { showPasteImportDialog = false },
             onImport = { namesText, targetType, contractorId, contractorName, dept, role ->
-                val count = viewModel.importPastedNames(namesText, targetType, contractorId, contractorName, dept, role)
+                val count = onImportPastedNames(namesText, targetType, contractorId, contractorName, dept, role)
                 Toast.makeText(context, "Imported $count employees successfully!", Toast.LENGTH_LONG).show()
                 showPasteImportDialog = false
             }
@@ -406,7 +492,9 @@ fun RoosterScreen(
     // --- DIALOG: JSON Backup / Export / Import ---
     if (showJsonExportImportDialog) {
         JsonBackupDialog(
-            viewModel = viewModel,
+            onExportJson = onExportJson,
+            onExportCsv = onExportCsv,
+            onImportJson = onImportJson,
             onDismiss = { showJsonExportImportDialog = false }
         )
     }
@@ -420,7 +508,7 @@ fun RoosterScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.deleteEmployee(emp)
+                        onDeleteEmployee(emp)
                         Toast.makeText(context, "Deleted ${emp.name}", Toast.LENGTH_SHORT).show()
                         showDeleteConfirmDialog = null
                     },
@@ -442,10 +530,11 @@ fun RoosterScreen(
 fun RoosterEmployeeCard(
     employee: Employee,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onEdit() }
             .testTag("rooster_card_${employee.id}"),
@@ -506,7 +595,8 @@ fun RoosterEmployeeCard(
                     Text(
                         text = "Contractor: ${employee.contractorName} • ${employee.defaultUnit}",
                         fontSize = 11.sp,
-                        color = IndustrialAmber600
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.Medium
                     )
                 }
 
@@ -668,8 +758,8 @@ fun AddEditEmployeeDialog(
                         ) {
                             Row(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
+                                .fillMaxWidth()
+                                .padding(10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -915,7 +1005,9 @@ fun PasteImportDialog(
 
 @Composable
 fun JsonBackupDialog(
-    viewModel: ManpowerViewModel,
+    onExportJson: () -> String,
+    onExportCsv: () -> String,
+    onImportJson: (String) -> Boolean,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -951,7 +1043,7 @@ fun JsonBackupDialog(
 
                     Button(
                         onClick = {
-                            val json = viewModel.exportAllDataJson()
+                            val json = onExportJson()
                             generatedJson = json
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("BSP Manpower Data", json))
@@ -966,7 +1058,7 @@ fun JsonBackupDialog(
 
                     OutlinedButton(
                         onClick = {
-                            val csv = viewModel.generateRoosterCsv()
+                            val csv = onExportCsv()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("BSP Employee Roster CSV", csv))
                             Toast.makeText(context, "Copied Employee CSV to clipboard!", Toast.LENGTH_SHORT).show()
@@ -1003,7 +1095,7 @@ fun JsonBackupDialog(
                     Button(
                         onClick = {
                             if (jsonInput.isNotBlank()) {
-                                val success = viewModel.importAllDataJson(jsonInput)
+                                val success = onImportJson(jsonInput)
                                 if (success) {
                                     Toast.makeText(context, "Master data restored successfully!", Toast.LENGTH_LONG).show()
                                     onDismiss()
@@ -1025,4 +1117,203 @@ fun JsonBackupDialog(
             TextButton(onClick = onDismiss) { Text("Close") }
         }
     )
+}
+
+// ==========================================
+// PREVIEWS - ALL STATES
+// ==========================================
+
+@Preview(name = "Rooster Screen - Default Populated", showBackground = true)
+@Composable
+fun RoosterScreenPreview_Default() {
+    MyApplicationTheme(darkTheme = false) {
+        RoosterScreenContent(
+            allEmployees = PreviewData.sampleEmployees,
+            contractors = PreviewData.sampleContractors,
+            departments = listOf("Laser Cutting", "Fabrication", "Welding Shop", "Press Shop"),
+            roles = listOf("Helper", "Welder", "Operator", "Fitter"),
+            designations = listOf("Production Supervisor", "Shift In-charge"),
+            units = listOf("Unit I", "Unit II", "Unit III"),
+            searchQuery = "",
+            onSearchQueryChange = {},
+            filterStatus = "All",
+            onFilterStatusChange = {},
+            collapsedGroups = emptyMap(),
+            onToggleCollapse = {},
+            onAddEmployee = {},
+            onUpdateEmployee = {},
+            onDeleteEmployee = {},
+            onImportPastedNames = { _, _, _, _, _, _ -> 0 },
+            onExportJson = { "{}" },
+            onExportCsv = { "" },
+            onImportJson = { true }
+        )
+    }
+}
+
+@Preview(name = "Rooster Screen - Dark Theme", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun RoosterScreenPreview_DarkTheme() {
+    MyApplicationTheme(darkTheme = true) {
+        RoosterScreenContent(
+            allEmployees = PreviewData.sampleEmployees,
+            contractors = PreviewData.sampleContractors,
+            departments = listOf("Laser Cutting", "Fabrication", "Welding Shop", "Press Shop"),
+            roles = listOf("Helper", "Welder", "Operator", "Fitter"),
+            designations = listOf("Production Supervisor", "Shift In-charge"),
+            units = listOf("Unit I", "Unit II", "Unit III"),
+            searchQuery = "",
+            onSearchQueryChange = {},
+            filterStatus = "All",
+            onFilterStatusChange = {},
+            collapsedGroups = emptyMap(),
+            onToggleCollapse = {},
+            onAddEmployee = {},
+            onUpdateEmployee = {},
+            onDeleteEmployee = {},
+            onImportPastedNames = { _, _, _, _, _, _ -> 0 },
+            onExportJson = { "{}" },
+            onExportCsv = { "" },
+            onImportJson = { true }
+        )
+    }
+}
+
+@Preview(name = "Rooster Screen - Filtered (Debarred & Out)", showBackground = true)
+@Composable
+fun RoosterScreenPreview_Filtered() {
+    MyApplicationTheme {
+        RoosterScreenContent(
+            allEmployees = PreviewData.sampleEmployees,
+            contractors = PreviewData.sampleContractors,
+            departments = listOf("Laser Cutting", "Fabrication", "Welding Shop", "Press Shop"),
+            roles = listOf("Helper", "Welder", "Operator", "Fitter"),
+            designations = listOf("Production Supervisor", "Shift In-charge"),
+            units = listOf("Unit I", "Unit II", "Unit III"),
+            searchQuery = "",
+            onSearchQueryChange = {},
+            filterStatus = "Debarred",
+            onFilterStatusChange = {},
+            collapsedGroups = emptyMap(),
+            onToggleCollapse = {},
+            onAddEmployee = {},
+            onUpdateEmployee = {},
+            onDeleteEmployee = {},
+            onImportPastedNames = { _, _, _, _, _, _ -> 0 },
+            onExportJson = { "{}" },
+            onExportCsv = { "" },
+            onImportJson = { true }
+        )
+    }
+}
+
+@Preview(name = "Rooster Screen - Empty Search State", showBackground = true)
+@Composable
+fun RoosterScreenPreview_Empty() {
+    MyApplicationTheme {
+        RoosterScreenContent(
+            allEmployees = emptyList(),
+            contractors = PreviewData.sampleContractors,
+            departments = listOf("Laser Cutting", "Fabrication"),
+            roles = listOf("Helper", "Welder"),
+            designations = listOf("Production Supervisor"),
+            units = listOf("Unit I"),
+            searchQuery = "UnknownPerson",
+            onSearchQueryChange = {},
+            filterStatus = "All",
+            onFilterStatusChange = {},
+            collapsedGroups = emptyMap(),
+            onToggleCollapse = {},
+            onAddEmployee = {},
+            onUpdateEmployee = {},
+            onDeleteEmployee = {},
+            onImportPastedNames = { _, _, _, _, _, _ -> 0 },
+            onExportJson = { "{}" },
+            onExportCsv = { "" },
+            onImportJson = { true }
+        )
+    }
+}
+
+@Preview(name = "Rooster Employee Cards - Various Types", showBackground = true)
+@Composable
+fun RoosterEmployeeCards_Preview() {
+    MyApplicationTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // 1. Staff Member Card
+            RoosterEmployeeCard(
+                employee = PreviewData.sampleEmployees[0],
+                onEdit = {},
+                onDelete = {}
+            )
+            // 2. Active Contract Labour Card
+            RoosterEmployeeCard(
+                employee = PreviewData.sampleEmployees[3],
+                onEdit = {},
+                onDelete = {}
+            )
+            // 3. Debarred Employee Card
+            RoosterEmployeeCard(
+                employee = PreviewData.sampleEmployees[6],
+                onEdit = {},
+                onDelete = {}
+            )
+            // 4. Housekeeping Staff Card
+            RoosterEmployeeCard(
+                employee = PreviewData.sampleEmployees[8],
+                onEdit = {},
+                onDelete = {}
+            )
+        }
+    }
+}
+
+@Preview(name = "Rooster Dialog - Add/Edit Employee", showBackground = true)
+@Composable
+fun AddEditEmployeeDialog_Preview() {
+    MyApplicationTheme {
+        AddEditEmployeeDialog(
+            employee = PreviewData.sampleEmployees[3],
+            isNew = false,
+            departments = listOf("Laser Cutting", "Fabrication", "Welding Shop", "Press Shop"),
+            roles = listOf("Helper", "Welder", "Operator", "Fitter"),
+            designations = listOf("Production Supervisor", "Shift In-charge"),
+            contractors = PreviewData.sampleContractors,
+            units = listOf("Unit I", "Unit II", "Unit III"),
+            onDismiss = {},
+            onSave = {}
+        )
+    }
+}
+
+@Preview(name = "Rooster Dialog - Fast Batch Paste Import", showBackground = true)
+@Composable
+fun PasteImportDialog_Preview() {
+    MyApplicationTheme {
+        PasteImportDialog(
+            contractors = PreviewData.sampleContractors,
+            departments = listOf("Laser Cutting", "Fabrication", "Welding Shop"),
+            roles = listOf("Helper", "Welder", "Operator"),
+            onDismiss = {},
+            onImport = { _, _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Rooster Dialog - Json Backup / Restore", showBackground = true)
+@Composable
+fun JsonBackupDialog_Preview() {
+    MyApplicationTheme {
+        JsonBackupDialog(
+            onExportJson = { "{\n  \"employees\": [ ... ]\n}" },
+            onExportCsv = { "Name,Type,Department\nVijay,Labour,Welding" },
+            onImportJson = { true },
+            onDismiss = {}
+        )
+    }
 }

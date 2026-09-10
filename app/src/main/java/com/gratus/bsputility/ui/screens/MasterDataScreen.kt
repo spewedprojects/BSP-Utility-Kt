@@ -1,5 +1,6 @@
 package com.gratus.bsputility.ui.screens
 
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -44,11 +45,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.Contractor
+import com.gratus.bsputility.data.models.Employee
+import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
+import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 
 @Composable
@@ -61,7 +67,39 @@ fun MasterDataScreen(
     val allConfigs by viewModel.allConfigItems.collectAsStateWithLifecycle()
     val allEmployees by viewModel.allEmployees.collectAsStateWithLifecycle()
 
-    var selectedTab by remember { mutableStateOf("Contractors") }
+    MasterDataScreenContent(
+        contractors = contractors,
+        allConfigs = allConfigs,
+        allEmployees = allEmployees,
+        onAddContractor = { viewModel.addContractor(it) },
+        onUpdateContractor = { viewModel.updateContractor(it) },
+        onDeleteContractor = {
+            viewModel.deleteContractor(it)
+            Toast.makeText(context, "Deleted ${it.name}", Toast.LENGTH_SHORT).show()
+        },
+        onAddConfigItem = { cat, name, type -> viewModel.addConfigItem(cat, name, type) },
+        onDeleteConfigItem = {
+            viewModel.deleteConfigItem(it)
+            Toast.makeText(context, "Removed ${it.name}", Toast.LENGTH_SHORT).show()
+        },
+        modifier = modifier
+    )
+}
+
+@Composable
+fun MasterDataScreenContent(
+    contractors: List<Contractor>,
+    allConfigs: List<ConfigItem>,
+    allEmployees: List<Employee>,
+    onAddContractor: (Contractor) -> Unit,
+    onUpdateContractor: (Contractor) -> Unit,
+    onDeleteContractor: (Contractor) -> Unit,
+    onAddConfigItem: (category: String, name: String, fieldType: String) -> Unit,
+    onDeleteConfigItem: (ConfigItem) -> Unit,
+    initialTab: String = "Contractors",
+    modifier: Modifier = Modifier
+) {
+    var selectedTab by remember { mutableStateOf(initialTab) }
     val tabs = listOf("Contractors", "Departments", "Designations", "Units", "Labour Roles", "Custom Fields")
 
     // Modals
@@ -92,7 +130,7 @@ fun MasterDataScreen(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier
-                    .padding(bottom = 64.dp)
+                    .padding(bottom = 0.dp)
                     .testTag("fab_add_master_item")
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add Item")
@@ -191,7 +229,7 @@ fun MasterDataScreen(
                                     Text(
                                         text = "$assignedCount labourers linked",
                                         fontSize = 11.sp,
-                                        color = IndustrialAmber600,
+                                        color = MaterialTheme.colorScheme.secondary,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
@@ -204,8 +242,7 @@ fun MasterDataScreen(
                                         Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
                                     }
                                     IconButton(onClick = {
-                                        viewModel.deleteContractor(contractor)
-                                        Toast.makeText(context, "Deleted ${contractor.name}", Toast.LENGTH_SHORT).show()
+                                        onDeleteContractor(contractor)
                                     }) {
                                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
                                     }
@@ -261,8 +298,7 @@ fun MasterDataScreen(
                                 }
 
                                 IconButton(onClick = {
-                                    viewModel.deleteConfigItem(item)
-                                    Toast.makeText(context, "Removed ${item.name}", Toast.LENGTH_SHORT).show()
+                                    onDeleteConfigItem(item)
                                 }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
                                 }
@@ -280,116 +316,252 @@ fun MasterDataScreen(
 
     // Modal: Add / Edit Contractor
     showAddContractorDialog?.let { c ->
-        var name by remember { mutableStateOf(c.name) }
-        var contact by remember { mutableStateOf(c.contactPerson) }
-        var phone by remember { mutableStateOf(c.phone) }
-        var notes by remember { mutableStateOf(c.notes) }
-
-        AlertDialog(
-            onDismissRequest = { showAddContractorDialog = null },
-            title = { Text(if (isNewContractor) "Add New Contractor" else "Edit Contractor") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("Contractor / Agency Name *") },
-                        modifier = Modifier.fillMaxWidth().testTag("input_contractor_name")
-                    )
-                    OutlinedTextField(
-                        value = contact,
-                        onValueChange = { contact = it },
-                        label = { Text("Contact Person") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = phone,
-                        onValueChange = { phone = it },
-                        label = { Text("Phone Number") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = notes,
-                        onValueChange = { notes = it },
-                        label = { Text("Notes (e.g. provides welders)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    if (name.isNotBlank()) {
-                        val toSave = c.copy(
-                            name = name.trim(),
-                            contactPerson = contact.trim(),
-                            phone = phone.trim(),
-                            notes = notes.trim()
-                        )
-                        if (isNewContractor) viewModel.addContractor(toSave)
-                        else viewModel.updateContractor(toSave)
-                        showAddContractorDialog = null
-                    }
-                }) {
-                    Text(if (isNewContractor) "Add Contractor" else "Save")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showAddContractorDialog = null }) {
-                    Text("Cancel")
-                }
+        AddContractorDialog(
+            contractor = c,
+            isNew = isNewContractor,
+            onDismiss = { showAddContractorDialog = null },
+            onSave = { toSave ->
+                if (isNewContractor) onAddContractor(toSave)
+                else onUpdateContractor(toSave)
+                showAddContractorDialog = null
             }
         )
     }
 
     // Modal: Add Config Item (Department, Role, Unit, Custom field)
     if (showAddConfigDialog) {
-        var itemName by remember { mutableStateOf("") }
-        var fieldType by remember { mutableStateOf("TEXT") }
+        AddConfigDialog(
+            category = newConfigCategory,
+            tabTitle = selectedTab,
+            onDismiss = { showAddConfigDialog = false },
+            onSave = { name, fieldType ->
+                onAddConfigItem(newConfigCategory, name, fieldType)
+                showAddConfigDialog = false
+            }
+        )
+    }
+}
 
-        AlertDialog(
-            onDismissRequest = { showAddConfigDialog = false },
-            title = {
-                Text("Add to ${selectedTab.removeSuffix("s")}")
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = itemName,
-                        onValueChange = { itemName = it },
-                        label = { Text("Name / Title *") },
-                        modifier = Modifier.fillMaxWidth().testTag("input_config_name")
+@Composable
+fun AddContractorDialog(
+    contractor: Contractor,
+    isNew: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (Contractor) -> Unit
+) {
+    var name by remember { mutableStateOf(contractor.name) }
+    var contact by remember { mutableStateOf(contractor.contactPerson) }
+    var phone by remember { mutableStateOf(contractor.phone) }
+    var notes by remember { mutableStateOf(contractor.notes) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isNew) "Add New Contractor" else "Edit Contractor") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Contractor / Agency Name *") },
+                    modifier = Modifier.fillMaxWidth().testTag("input_contractor_name")
+                )
+                OutlinedTextField(
+                    value = contact,
+                    onValueChange = { contact = it },
+                    label = { Text("Contact Person") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Phone Number") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Notes (e.g. provides welders)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                if (name.isNotBlank()) {
+                    val toSave = contractor.copy(
+                        name = name.trim(),
+                        contactPerson = contact.trim(),
+                        phone = phone.trim(),
+                        notes = notes.trim()
                     )
+                    onSave(toSave)
+                }
+            }) {
+                Text(if (isNew) "Add Contractor" else "Save")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
 
-                    if (newConfigCategory == "CUSTOM_FIELD") {
-                        Text("Field Type:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        val types = listOf("TEXT", "NUMBER", "DROPDOWN", "DATE", "BOOLEAN")
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            types.forEach { t ->
-                                FilterChip(
-                                    selected = fieldType == t,
-                                    onClick = { fieldType = t },
-                                    label = { Text(t, fontSize = 10.sp) }
-                                )
-                            }
+@Composable
+fun AddConfigDialog(
+    category: String,
+    tabTitle: String,
+    onDismiss: () -> Unit,
+    onSave: (name: String, fieldType: String) -> Unit
+) {
+    var itemName by remember { mutableStateOf("") }
+    var fieldType by remember { mutableStateOf("TEXT") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Add to ${tabTitle.removeSuffix("s")}")
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = itemName,
+                    onValueChange = { itemName = it },
+                    label = { Text("Name / Title *") },
+                    modifier = Modifier.fillMaxWidth().testTag("input_config_name")
+                )
+
+                if (category == "CUSTOM_FIELD") {
+                    Text("Field Type:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    val types = listOf("TEXT", "NUMBER", "DROPDOWN", "DATE", "BOOLEAN")
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        types.forEach { t ->
+                            FilterChip(
+                                selected = fieldType == t,
+                                onClick = { fieldType = t },
+                                label = { Text(t, fontSize = 10.sp) }
+                            )
                         }
                     }
                 }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    if (itemName.isNotBlank()) {
-                        viewModel.addConfigItem(newConfigCategory, itemName.trim(), fieldType)
-                        showAddConfigDialog = false
-                    }
-                }) {
-                    Text("Add")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showAddConfigDialog = false }) {
-                    Text("Cancel")
-                }
             }
+        },
+        confirmButton = {
+            Button(onClick = {
+                if (itemName.isNotBlank()) {
+                    onSave(itemName.trim(), fieldType)
+                }
+            }) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+// ==========================================
+// PREVIEWS - ALL STATES
+// ==========================================
+
+@Preview(name = "Master Data - Contractors Tab", showBackground = true)
+@Composable
+fun MasterDataScreenPreview_Contractors() {
+    MyApplicationTheme(darkTheme = false) {
+        MasterDataScreenContent(
+            contractors = PreviewData.sampleContractors,
+            allConfigs = PreviewData.sampleConfigItems,
+            allEmployees = PreviewData.sampleEmployees,
+            onAddContractor = {},
+            onUpdateContractor = {},
+            onDeleteContractor = {},
+            onAddConfigItem = { _, _, _ -> },
+            onDeleteConfigItem = {},
+            initialTab = "Contractors"
+        )
+    }
+}
+
+@Preview(name = "Master Data - Departments Tab", showBackground = true)
+@Composable
+fun MasterDataScreenPreview_Departments() {
+    MyApplicationTheme {
+        MasterDataScreenContent(
+            contractors = PreviewData.sampleContractors,
+            allConfigs = PreviewData.sampleConfigItems,
+            allEmployees = PreviewData.sampleEmployees,
+            onAddContractor = {},
+            onUpdateContractor = {},
+            onDeleteContractor = {},
+            onAddConfigItem = { _, _, _ -> },
+            onDeleteConfigItem = {},
+            initialTab = "Departments"
+        )
+    }
+}
+
+@Preview(name = "Master Data - Custom Fields Tab", showBackground = true)
+@Composable
+fun MasterDataScreenPreview_CustomFields() {
+    MyApplicationTheme {
+        MasterDataScreenContent(
+            contractors = PreviewData.sampleContractors,
+            allConfigs = PreviewData.sampleConfigItems,
+            allEmployees = PreviewData.sampleEmployees,
+            onAddContractor = {},
+            onUpdateContractor = {},
+            onDeleteContractor = {},
+            onAddConfigItem = { _, _, _ -> },
+            onDeleteConfigItem = {},
+            initialTab = "Custom Fields"
+        )
+    }
+}
+
+@Preview(name = "Master Data - Dark Theme", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun MasterDataScreenPreview_DarkTheme() {
+    MyApplicationTheme(darkTheme = true) {
+        MasterDataScreenContent(
+            contractors = PreviewData.sampleContractors,
+            allConfigs = PreviewData.sampleConfigItems,
+            allEmployees = PreviewData.sampleEmployees,
+            onAddContractor = {},
+            onUpdateContractor = {},
+            onDeleteContractor = {},
+            onAddConfigItem = { _, _, _ -> },
+            onDeleteConfigItem = {},
+            initialTab = "Contractors"
+        )
+    }
+}
+
+@Preview(name = "Master Data Dialog - Add Contractor", showBackground = true)
+@Composable
+fun AddContractorDialog_Preview() {
+    MyApplicationTheme {
+        AddContractorDialog(
+            contractor = Contractor(name = "Apex Facilities", contactPerson = "Mahesh Jadhav", phone = "9876543210", notes = "Housekeeping team"),
+            isNew = true,
+            onDismiss = {},
+            onSave = {}
+        )
+    }
+}
+
+@Preview(name = "Master Data Dialog - Add Config Item", showBackground = true)
+@Composable
+fun AddConfigDialog_Preview() {
+    MyApplicationTheme {
+        AddConfigDialog(
+            category = "CUSTOM_FIELD",
+            tabTitle = "Custom Fields",
+            onDismiss = {},
+            onSave = { _, _ -> }
         )
     }
 }

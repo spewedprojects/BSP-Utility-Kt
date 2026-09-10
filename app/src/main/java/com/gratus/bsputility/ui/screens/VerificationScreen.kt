@@ -1,5 +1,6 @@
 package com.gratus.bsputility.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -51,14 +52,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gratus.bsputility.data.models.DepartmentVerification
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeTypes
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.wrapContentWidth
+import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
+import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import com.gratus.bsputility.ui.theme.PresentGreen
+import com.gratus.bsputility.ui.theme.PresentGreenDark
+import com.gratus.bsputility.ui.theme.PresentGreenDarkBg
+import com.gratus.bsputility.ui.theme.PresentGreenDarkText
 import com.gratus.bsputility.ui.theme.PresentGreenLight
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 
@@ -101,6 +110,29 @@ fun VerificationScreen(
         allDepts.count { verifMap[it]?.isVerified == true }
     }
 
+    VerificationScreenContent(
+        allDepts = allDepts,
+        deptMap = deptMap,
+        verifMap = verifMap,
+        staffList = staffList,
+        verifiedCount = verifiedCount,
+        onVerify = { deptName, staffId, staffName, isVerified, remarks ->
+            viewModel.verifyDepartment(deptName, staffId, staffName, isVerified, remarks)
+        },
+        modifier = modifier
+    )
+}
+
+@Composable
+fun VerificationScreenContent(
+    allDepts: List<String>,
+    deptMap: Map<String, List<ManpowerViewModel.EmployeeAttendanceItem>>,
+    verifMap: Map<String, DepartmentVerification>,
+    staffList: List<Employee>,
+    verifiedCount: Int,
+    onVerify: (deptName: String, staffId: Long?, staffName: String, isVerified: Boolean, remarks: String) -> Unit,
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -114,7 +146,7 @@ fun VerificationScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -144,8 +176,9 @@ fun VerificationScreen(
                     }
 
                     Badge(
-                        containerColor = if (verifiedCount == allDepts.size && allDepts.isNotEmpty()) PresentGreen else IndustrialAmber600,
-                        contentColor = Color.White
+                        modifier = Modifier.wrapContentWidth(),
+                        containerColor = if (verifiedCount == allDepts.size && allDepts.isNotEmpty()) PresentGreen else MaterialTheme.colorScheme.secondary,
+                        contentColor = if (verifiedCount == allDepts.size && allDepts.isNotEmpty()) Color.White else MaterialTheme.colorScheme.onSecondary
                     ) {
                         Text(
                             text = "$verifiedCount / ${allDepts.size}",
@@ -185,7 +218,7 @@ fun VerificationScreen(
                     verification = verif,
                     staffList = staffList,
                     onVerify = { staffId, staffName, isVerified, remarks ->
-                        viewModel.verifyDepartment(deptName, staffId, staffName, isVerified, remarks)
+                        onVerify(deptName, staffId, staffName, isVerified, remarks)
                     }
                 )
             }
@@ -203,7 +236,8 @@ fun DepartmentVerificationCard(
     labourList: List<ManpowerViewModel.EmployeeAttendanceItem>,
     verification: DepartmentVerification?,
     staffList: List<Employee>,
-    onVerify: (staffId: Long?, staffName: String, isVerified: Boolean, remarks: String) -> Unit
+    onVerify: (staffId: Long?, staffName: String, isVerified: Boolean, remarks: String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val isVerified = verification?.isVerified == true
     var isExpanded by remember { mutableStateOf(false) }
@@ -217,13 +251,13 @@ fun DepartmentVerificationCard(
     }
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .testTag("verification_card_$departmentName"),
         colors = CardDefaults.cardColors(
             containerColor = if (isVerified) PresentGreenLight.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(
             1.dp,
             if (isVerified) PresentGreen.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
@@ -257,9 +291,13 @@ fun DepartmentVerificationCard(
                     }
                 }
 
+                val isDark = isSystemInDarkTheme()
+                val verifiedBg = if (isDark) PresentGreenDarkBg.copy(alpha = 0.5f) else PresentGreenLight
+                val verifiedContent = if (isDark) PresentGreenDarkText else PresentGreenDark
+
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = if (isVerified) PresentGreenLight else MaterialTheme.colorScheme.surfaceVariant
+                    color = if (isVerified) verifiedBg else MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -268,7 +306,7 @@ fun DepartmentVerificationCard(
                         Icon(
                             imageVector = if (isVerified) Icons.Default.CheckCircle else Icons.Default.Close,
                             contentDescription = null,
-                            tint = if (isVerified) PresentGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (isVerified) verifiedContent else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
@@ -276,7 +314,7 @@ fun DepartmentVerificationCard(
                             text = if (isVerified) "VERIFIED" else "PENDING",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isVerified) PresentGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (isVerified) verifiedContent else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -459,6 +497,136 @@ fun DepartmentVerificationCard(
                     }
                 }
             }
+        }
+    }
+}
+
+// ==========================================
+// PREVIEWS - ALL STATES
+// ==========================================
+
+@Preview(name = "Verification Screen - Mixed Progress (50%)", showBackground = true)
+@Composable
+fun VerificationScreenPreview_MixedProgress() {
+    val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
+    val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
+    val verifMap = PreviewData.sampleVerifications.associateBy { it.departmentName }
+    val depts = listOf("Welding Shop", "Laser Cutting", "Fabrication", "Press Shop")
+    val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
+
+    MyApplicationTheme(darkTheme = false) {
+        VerificationScreenContent(
+            allDepts = depts,
+            deptMap = deptMap,
+            verifMap = verifMap,
+            staffList = staffList,
+            verifiedCount = 2,
+            onVerify = { _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Verification Screen - Fully Verified (100%)", showBackground = true)
+@Composable
+fun VerificationScreenPreview_FullyVerified() {
+    val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
+    val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
+    val depts = listOf("Welding Shop", "Laser Cutting", "Fabrication", "Press Shop")
+    val verifMap = depts.associateWith { d ->
+        DepartmentVerification(
+            departmentName = d,
+            isVerified = true,
+            verifiedByStaffName = "Rahul Kulkarni",
+            verifiedAtTime = "10:15 AM",
+            date = "2026-09-10"
+        )
+    }
+    val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
+
+    MyApplicationTheme {
+        VerificationScreenContent(
+            allDepts = depts,
+            deptMap = deptMap,
+            verifMap = verifMap,
+            staffList = staffList,
+            verifiedCount = 4,
+            onVerify = { _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Verification Screen - All Pending (0%)", showBackground = true)
+@Composable
+fun VerificationScreenPreview_AllPending() {
+    val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
+    val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
+    val depts = listOf("Welding Shop", "Laser Cutting", "Fabrication", "Press Shop")
+    val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
+
+    MyApplicationTheme {
+        VerificationScreenContent(
+            allDepts = depts,
+            deptMap = deptMap,
+            verifMap = emptyMap(),
+            staffList = staffList,
+            verifiedCount = 0,
+            onVerify = { _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Verification Screen - Dark Theme", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun VerificationScreenPreview_DarkTheme() {
+    val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
+    val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
+    val verifMap = PreviewData.sampleVerifications.associateBy { it.departmentName }
+    val depts = listOf("Welding Shop", "Laser Cutting", "Fabrication", "Press Shop")
+    val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
+
+    MyApplicationTheme(darkTheme = true) {
+        VerificationScreenContent(
+            allDepts = depts,
+            deptMap = deptMap,
+            verifMap = verifMap,
+            staffList = staffList,
+            verifiedCount = 2,
+            onVerify = { _, _, _, _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Department Verification Cards - Pending vs Verified", showBackground = true)
+@Composable
+fun DepartmentVerificationCards_Preview() {
+    val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
+    val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
+    val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
+
+    MyApplicationTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 1. Verified Card
+            DepartmentVerificationCard(
+                departmentName = "Welding Shop",
+                labourList = deptMap["Welding Shop"] ?: emptyList(),
+                verification = PreviewData.sampleVerifications[0],
+                staffList = staffList,
+                onVerify = { _, _, _, _ -> }
+            )
+
+            // 2. Pending Card
+            DepartmentVerificationCard(
+                departmentName = "Fabrication",
+                labourList = deptMap["Fabrication"] ?: emptyList(),
+                verification = PreviewData.sampleVerifications[2],
+                staffList = staffList,
+                onVerify = { _, _, _, _ -> }
+            )
         }
     }
 }

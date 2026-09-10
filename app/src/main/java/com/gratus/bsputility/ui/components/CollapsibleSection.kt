@@ -1,5 +1,6 @@
 package com.gratus.bsputility.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -17,9 +18,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Badge
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -31,8 +35,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.gratus.bsputility.ui.theme.IndustrialAmber600
+import com.gratus.bsputility.ui.theme.IndustrialNavy900
+import com.gratus.bsputility.ui.theme.MyApplicationTheme
 
 @Composable
 fun CollapsibleSection(
@@ -111,6 +119,74 @@ fun CollapsibleSection(
                     .padding(top = 6.dp)
             ) {
                 content()
+            }
+        }
+    }
+}
+
+// ==========================================
+// PREVIEWS
+// ==========================================
+
+@Preview(name = "Collapsible Section - Expanded", showBackground = true)
+@Composable
+fun CollapsibleSectionPreview_Expanded() {
+    MyApplicationTheme {
+        Column(modifier = Modifier.padding(16.dp)) {
+            CollapsibleSection(
+                title = "Contract Labourers",
+                count = 14,
+                isExpanded = true,
+                onToggle = {},
+                leadingIcon = Icons.Default.Engineering,
+                iconTint = IndustrialAmber600
+            ) {
+                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("Vijay Thorat (Welder)", modifier = Modifier.padding(12.dp))
+                }
+                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("Pravin Shinde (Laser Operator)", modifier = Modifier.padding(12.dp))
+                }
+            }
+        }
+    }
+}
+
+@Preview(name = "Collapsible Section - Collapsed", showBackground = true)
+@Composable
+fun CollapsibleSectionPreview_Collapsed() {
+    MyApplicationTheme {
+        Column(modifier = Modifier.padding(16.dp)) {
+            CollapsibleSection(
+                title = "Staff Members",
+                count = 5,
+                isExpanded = false,
+                onToggle = {},
+                leadingIcon = Icons.Default.Badge,
+                iconTint = IndustrialNavy900
+            ) {
+                Text("Collapsed content")
+            }
+        }
+    }
+}
+
+@Preview(name = "Collapsible Section - Dark Theme", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun CollapsibleSectionPreview_DarkTheme() {
+    MyApplicationTheme(darkTheme = true) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            CollapsibleSection(
+                title = "Staff Members",
+                count = 5,
+                isExpanded = true,
+                onToggle = {},
+                leadingIcon = Icons.Default.Badge,
+                iconTint = IndustrialAmber600
+            ) {
+                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("Rahul Kulkarni (Production Supervisor)", modifier = Modifier.padding(12.dp))
+                }
             }
         }
     }

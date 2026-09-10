@@ -1,8 +1,10 @@
 package com.gratus.bsputility.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,9 +37,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
+import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -114,7 +118,7 @@ fun DateNavigationBar(
                     Icon(
                         imageVector = Icons.Default.CalendarToday,
                         contentDescription = "Calendar",
-                        tint = if (isToday) IndustrialAmber600 else MaterialTheme.colorScheme.primary,
+                        tint = if (isToday) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -154,7 +158,7 @@ fun DateNavigationBar(
                     Icon(
                         imageVector = Icons.Default.Today,
                         contentDescription = "Jump to Today",
-                        tint = IndustrialAmber600
+                        tint = MaterialTheme.colorScheme.secondary
                     )
                 }
             }
@@ -199,5 +203,49 @@ fun DateNavigationBar(
         ) {
             DatePicker(state = datePickerState)
         }
+    }
+}
+
+// ==========================================
+// PREVIEWS
+// ==========================================
+
+@Preview(name = "Date Navigation - Today State", showBackground = true)
+@Composable
+fun DateNavigationBarPreview_Today() {
+    val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    MyApplicationTheme {
+        DateNavigationBar(
+            selectedDate = today,
+            onPreviousDay = {},
+            onNextDay = {},
+            onDateSelected = {}
+        )
+    }
+}
+
+@Preview(name = "Date Navigation - Past Date (Jump to Today visible)", showBackground = true)
+@Composable
+fun DateNavigationBarPreview_PastDate() {
+    MyApplicationTheme {
+        DateNavigationBar(
+            selectedDate = "2026-09-01",
+            onPreviousDay = {},
+            onNextDay = {},
+            onDateSelected = {}
+        )
+    }
+}
+
+@Preview(name = "Date Navigation - Dark Theme", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun DateNavigationBarPreview_DarkTheme() {
+    MyApplicationTheme(darkTheme = true) {
+        DateNavigationBar(
+            selectedDate = "2026-09-10",
+            onPreviousDay = {},
+            onNextDay = {},
+            onDateSelected = {}
+        )
     }
 }
