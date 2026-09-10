@@ -1,0 +1,6 @@
+{
+  "name": "BSP Manpower Attendance",
+  "description": "Daily contract labour and staff attendance and manpower reporting app for BSP Metatech LLP Chakan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
