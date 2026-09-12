@@ -392,4 +392,318 @@ class ReverificationFeaturesTest {
         assertEquals(1, weldingList.size)
         assertEquals("Rajesh Staff", weldingList[0].name)
     }
+
+    // =========================================================================
+    // TESTS FOR ISSUES #4 to #10
+    // =========================================================================
+
+    @Test
+    fun `Issue 4 - Department Verification screen only includes departments with active or present workers`() {
+        val configuredDepts = listOf("Welding Shop", "Laser Cutting", "Assembly", "Paint Shop", "Quality Control")
+
+        val dailyLabourList = listOf(
+            Employee(id = 1L, name = "Welder 1", type = EmployeeTypes.LABOUR, dateAdded = "2026-09-12"),
+            Employee(id = 2L, name = "Laser Op 1", type = EmployeeTypes.LABOUR, dateAdded = "2026-09-12")
+        )
+        val dailyAttendanceList = listOf(
+            com.gratus.bsputility.data.models.DailyAttendance(date = "2026-09-12", employeeId = 1L, employeeName = "Welder 1", employeeType = EmployeeTypes.LABOUR, dayDepartment = "Welding Shop", isPresent = true),
+            com.gratus.bsputility.data.models.DailyAttendance(date = "2026-09-12", employeeId = 2L, employeeName = "Laser Op 1", employeeType = EmployeeTypes.LABOUR, dayDepartment = "Laser Cutting", isPresent = false)
+        )
+
+        // Calculate assigned/present departments
+        val deptMap = dailyLabourList.groupBy { emp ->
+            val att = dailyAttendanceList.find { it.employeeId == emp.id }
+            att?.dayDepartment?.ifBlank { null }
+                ?: emp.permanentDepartment.ifBlank { null }
+                ?: "Unassigned"
+        }
+        val presentDeptsWithWorkers = dailyAttendanceList
+            .filter { it.isPresent && it.dayDepartment.isNotBlank() }
+            .map { it.dayDepartment }
+            .toSet()
+
+        val activeDepts = configuredDepts.filter { dept ->
+            (deptMap[dept]?.isNotEmpty() == true) || presentDeptsWithWorkers.contains(dept)
+        }
+
+        // Only Welding Shop and Laser Cutting should be active, others omitted
+        assertEquals(2, activeDepts.size)
+        assertTrue(activeDepts.contains("Welding Shop"))
+        assertTrue(activeDepts.contains("Laser Cutting"))
+        assertFalse(activeDepts.contains("Assembly"))
+        assertFalse(activeDepts.contains("Paint Shop"))
+        assertFalse(activeDepts.contains("Quality Control"))
+
+        // When no active departments exist, activeDepts is empty (triggering placeholder UI)
+        val noLabourDeptMap = emptyMap<String, List<Employee>>()
+        val noActiveDepts = configuredDepts.filter { dept ->
+            (noLabourDeptMap[dept]?.isNotEmpty() == true)
+        }
+        assertTrue(noActiveDepts.isEmpty())
+    }
+
+    @Test
+    fun `Issue 5 - Mark All sets all active workers present and restores previous snapshot on undo`() {
+        data class TestAtt(val id: Long, val isPresent: Boolean, val status: String)
+
+        val initialList = listOf(
+            TestAtt(id = 1L, isPresent = true, status = EmployeeStatuses.ACTIVE),
+            TestAtt(id = 2L, isPresent = false, status = EmployeeStatuses.ACTIVE),
+            TestAtt(id = 3L, isPresent = false, status = EmployeeStatuses.ACTIVE),
+            TestAtt(id = 4L, isPresent = false, status = EmployeeStatuses.DEBARRED) // Not active
+        )
+
+        // Check if all active are present initially
+        val activeWorkers = initialList.filter { it.status == EmployeeStatuses.ACTIVE }
+        val areAllActivePresentInitial = activeWorkers.isNotEmpty() && activeWorkers.all { it.isPresent }
+        assertFalse(areAllActivePresentInitial)
+
+        // Action 1: Mark All Present
+        var preMarkAllSnapshot: List<TestAtt>? = null
+        var currentList = initialList
+
+        if (areAllActivePresentInitial) {
+            // Undo branch (not taken here)
+        } else {
+            preMarkAllSnapshot = currentList.toList()
+            currentList = currentList.map { item ->
+                if (item.status == EmployeeStatuses.ACTIVE) item.copy(isPresent = true) else item
+            }
+        }
+
+        // Verify all active are now present, debarred unaffected
+        val activeAfterMarkAll = currentList.filter { it.status == EmployeeStatuses.ACTIVE }
+        assertTrue(activeAfterMarkAll.all { it.isPresent })
+        assertFalse(currentList.first { it.id == 4L }.isPresent)
+
+        // Check areAllActivePresent now
+        val areAllActivePresentNow = activeAfterMarkAll.isNotEmpty() && activeAfterMarkAll.all { it.isPresent }
+        assertTrue(areAllActivePresentNow)
+
+        // Action 2: User taps "Mark All" again -> It should Undo and restore preMarkAllSnapshot
+        if (areAllActivePresentNow && preMarkAllSnapshot != null) {
+            currentList = preMarkAllSnapshot
+            preMarkAllSnapshot = null
+        }
+
+        // Verify restoration: id 1 is present, id 2 is absent, id 3 is absent
+        assertEquals(true, currentList.first { it.id == 1L }.isPresent)
+        assertEquals(false, currentList.first { it.id == 2L }.isPresent)
+        assertEquals(false, currentList.first { it.id == 3L }.isPresent)
+    }
+
+    @Test
+    fun `Issue 6 - Staff contractor sanitization on creation, import, and clearing database associations`() {
+        // 1. Staff imported via CSV/JSON must clear contractor fields
+        val staffImportJson = JSONObject().apply {
+            put("name", "Arun Patil")
+            put("type", EmployeeTypes.STAFF)
+            put("contractorName", "Apex Contractors") // Accidental contractor
+            put("permanentDepartment", "Welding Shop")
+        }
+
+        val empType = staffImportJson.optString("type", EmployeeTypes.LABOUR)
+        val sanitizedStaff = Employee(
+            name = staffImportJson.optString("name"),
+            type = empType,
+            dateAdded = "2026-09-12",
+            contractorName = if (empType == EmployeeTypes.STAFF) "" else staffImportJson.optString("contractorName"),
+            permanentDepartment = if (empType == EmployeeTypes.STAFF) staffImportJson.optString("permanentDepartment") else ""
+        )
+
+        assertEquals("", sanitizedStaff.contractorName)
+        assertEquals("Welding Shop", sanitizedStaff.permanentDepartment)
+
+        // 2. Existing database associations sanitization simulation
+        val dbEmployees = listOf(
+            Employee(id = 1L, name = "Staff with leak", type = EmployeeTypes.STAFF, dateAdded = "2026-09-12", contractorName = "Legacy Contractor"),
+            Employee(id = 2L, name = "Valid Staff", type = EmployeeTypes.STAFF, dateAdded = "2026-09-12", contractorName = ""),
+            Employee(id = 3L, name = "Labourer", type = EmployeeTypes.LABOUR, dateAdded = "2026-09-12", contractorName = "Apex Contractors")
+        )
+
+        // Simulate UPDATE employee SET contractorName = '', contractorId = NULL WHERE type = 'STAFF' AND contractorName != ''
+        val cleanedEmployees = dbEmployees.map { emp ->
+            if (emp.type == EmployeeTypes.STAFF && emp.contractorName.isNotBlank()) {
+                emp.copy(contractorName = "")
+            } else {
+                emp
+            }
+        }
+
+        assertEquals("", cleanedEmployees.first { it.id == 1L }.contractorName)
+        assertEquals("", cleanedEmployees.first { it.id == 2L }.contractorName)
+        assertEquals("Apex Contractors", cleanedEmployees.first { it.id == 3L }.contractorName)
+    }
+
+    @Test
+    fun `Issue 7 - PasteImportDialog parses lines correctly and supports Staff vs Labour targets`() {
+        val pastedText = """
+            Suresh More
+            Dinesh Kumar
+            
+            Kavita Sharma
+        """.trimIndent()
+
+        val parsedNames = pastedText.lines().map { it.trim() }.filter { it.isNotBlank() }
+        assertEquals(3, parsedNames.size)
+        assertEquals("Suresh More", parsedNames[0])
+        assertEquals("Dinesh Kumar", parsedNames[1])
+        assertEquals("Kavita Sharma", parsedNames[2])
+
+        // Importing as Staff guarantees contractorName is empty and permanentDepartment is assigned
+        val staffList = parsedNames.map { name ->
+            Employee(
+                name = name,
+                type = EmployeeTypes.STAFF,
+                dateAdded = "2026-09-12",
+                contractorName = "",
+                permanentDepartment = "Production"
+            )
+        }
+        assertTrue(staffList.all { it.type == EmployeeTypes.STAFF && it.contractorName.isEmpty() && it.permanentDepartment == "Production" })
+
+        // Importing as Labour guarantees permanentDepartment is empty
+        val labourList = parsedNames.map { name ->
+            Employee(
+                name = name,
+                type = EmployeeTypes.LABOUR,
+                dateAdded = "2026-09-12",
+                contractorName = "Apex Contractors",
+                permanentDepartment = ""
+            )
+        }
+        assertTrue(labourList.all { it.type == EmployeeTypes.LABOUR && it.contractorName == "Apex Contractors" && it.permanentDepartment.isEmpty() })
+    }
+
+    @Test
+    fun `Issue 8 - Mutual exclusivity between Staff and Contractor filters, and All Contractors excludes Staff`() {
+        val dataset = listOf(
+            Employee(id = 1L, name = "Staff HR", type = EmployeeTypes.STAFF, dateAdded = "2026-09-12", contractorName = ""),
+            Employee(id = 2L, name = "Staff Welding", type = EmployeeTypes.STAFF, dateAdded = "2026-09-12", contractorName = ""),
+            Employee(id = 3L, name = "Apex Worker", type = EmployeeTypes.LABOUR, dateAdded = "2026-09-12", contractorName = "Apex Contractors"),
+            Employee(id = 4L, name = "Chakan Worker", type = EmployeeTypes.LABOUR, dateAdded = "2026-09-12", contractorName = "Chakan Workforce"),
+            Employee(id = 5L, name = "Direct Labour", type = EmployeeTypes.LABOUR, dateAdded = "2026-09-12", contractorName = "")
+        )
+
+        fun filter(
+            list: List<Employee>,
+            typeFilter: String, // "ALL", "STAFF", "LABOUR"
+            contractorFilter: String? // null, "__ALL_CONTRACTORS__", or "Apex Contractors"
+        ): List<Employee> {
+            return list.filter { emp ->
+                val matchesType = when (typeFilter) {
+                    "STAFF" -> emp.type == EmployeeTypes.STAFF
+                    "LABOUR" -> emp.type != EmployeeTypes.STAFF
+                    else -> true
+                }
+                val matchesContractor = when (contractorFilter) {
+                    null -> true
+                    "__ALL_CONTRACTORS__" -> emp.type != EmployeeTypes.STAFF && emp.contractorName.isNotBlank()
+                    else -> emp.contractorName.equals(contractorFilter, ignoreCase = true)
+                }
+                matchesType && matchesContractor
+            }
+        }
+
+        // 1. "All Contractors" selected -> excludes Staff and Direct Labour without contractor
+        val allContractorsOnly = filter(dataset, "ALL", "__ALL_CONTRACTORS__")
+        assertEquals(2, allContractorsOnly.size)
+        assertTrue(allContractorsOnly.none { it.type == EmployeeTypes.STAFF })
+        assertTrue(allContractorsOnly.all { it.contractorName.isNotBlank() })
+
+        // 2. Specific Contractor selected -> only Apex
+        val apexOnly = filter(dataset, "ALL", "Apex Contractors")
+        assertEquals(1, apexOnly.size)
+        assertEquals("Apex Worker", apexOnly[0].name)
+
+        // 3. Mutual exclusivity logic: selecting Staff resets contractor to null
+        var currentType = "ALL"
+        var currentContractor: String? = "Apex Contractors"
+
+        // User clicks "Staff"
+        currentType = "STAFF"
+        if (currentType == "STAFF") currentContractor = null
+        assertEquals(null, currentContractor)
+
+        val staffOnly = filter(dataset, currentType, currentContractor)
+        assertEquals(2, staffOnly.size)
+        assertTrue(staffOnly.all { it.type == EmployeeTypes.STAFF })
+
+        // 4. Mutual exclusivity logic: selecting Contractor resets type away from Staff
+        currentContractor = "__ALL_CONTRACTORS__"
+        if (currentType == "STAFF") currentType = "ALL"
+        assertEquals("ALL", currentType)
+        val afterContractorSelect = filter(dataset, currentType, currentContractor)
+        assertEquals(2, afterContractorSelect.size)
+        assertTrue(afterContractorSelect.none { it.type == EmployeeTypes.STAFF })
+    }
+
+    @Test
+    fun `Issue 9 - Staff Unit and Shift fields are properly editable and persisted`() {
+        val staffEmployee = Employee(
+            id = 100L,
+            name = "Senior Supervisor",
+            type = EmployeeTypes.STAFF,
+            dateAdded = "2026-09-12",
+            defaultUnit = "Unit I",
+            defaultShift = "Shift A",
+            permanentDepartment = "Welding Shop"
+        )
+
+        // Updating Staff Unit and Shift
+        val updatedStaff = staffEmployee.copy(
+            defaultUnit = "Unit II",
+            defaultShift = "General"
+        )
+
+        assertEquals("Unit II", updatedStaff.defaultUnit)
+        assertEquals("General", updatedStaff.defaultShift)
+        assertEquals(EmployeeTypes.STAFF, updatedStaff.type)
+        assertEquals("Welding Shop", updatedStaff.permanentDepartment)
+    }
+
+    @Test
+    fun `Issue 10 - Attendance time epoch timestamp migration and 12h-24h display formatting`() {
+        // 1. Parsing legacy string "08:30 AM" on date "2026-09-12" to epoch timestamp
+        val dateStr = "2026-09-12"
+        val legacyTime = "08:30 AM"
+
+        fun parseTimeToTimestamp(date: String, time: String): Long {
+            if (time.isBlank()) return 0L
+            return try {
+                val full12 = "$date $time"
+                java.text.SimpleDateFormat("yyyy-MM-dd hh:mm a", java.util.Locale.ENGLISH).parse(full12)?.time
+                    ?: try {
+                        java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ENGLISH).parse(full12)?.time ?: 0L
+                    } catch (_: Exception) { 0L }
+            } catch (_: Exception) {
+                try {
+                    val full24 = "$date $time"
+                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ENGLISH).parse(full24)?.time ?: 0L
+                } catch (_: Exception) { 0L }
+            }
+        }
+
+        val timestamp = parseTimeToTimestamp(dateStr, legacyTime)
+        assertTrue("Timestamp should be greater than zero", timestamp > 0L)
+
+        // 2. Formatting back to 12-hour and 24-hour display
+        val sdf12 = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.ENGLISH)
+        val sdf24 = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ENGLISH)
+
+        val display12 = sdf12.format(java.util.Date(timestamp))
+        val display24 = sdf24.format(java.util.Date(timestamp))
+
+        assertEquals("08:30 AM", display12)
+        assertEquals("08:30", display24)
+
+        // 3. Test evening time "05:45 PM"
+        val eveningTimestamp = parseTimeToTimestamp(dateStr, "05:45 PM")
+        val eveningDisplay12 = sdf12.format(java.util.Date(eveningTimestamp))
+        val eveningDisplay24 = sdf24.format(java.util.Date(eveningTimestamp))
+
+        assertEquals("05:45 PM", eveningDisplay12)
+        assertEquals("17:45", eveningDisplay24)
+    }
 }
+

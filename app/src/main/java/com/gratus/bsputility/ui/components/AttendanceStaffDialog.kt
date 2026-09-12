@@ -46,20 +46,22 @@ fun AttendanceStaffDialog(
     currentPresence: Boolean,
     currentTime: String,
     currentRemarks: String,
+    currentTimestamp: Long = 0L,
+    is24HourFormat: Boolean = false,
     isFutureDate: Boolean = false,
     onDismiss: () -> Unit,
-    onSave: (isPresent: Boolean, attendanceTime: String, remarks: String) -> Unit
+    onSave: (isPresent: Boolean, attendanceTime: String, remarks: String, attendanceTimestamp: Long) -> Unit
 ) {
     var isPresent by remember { mutableStateOf(currentPresence) }
     var timeText by remember {
         mutableStateOf(
             if (currentTime.isNotBlank()) currentTime
+            else if (is24HourFormat) SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
             else SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
         )
     }
+    var timeTimestamp by remember { mutableStateOf(currentTimestamp) }
     var remarks by remember { mutableStateOf(currentRemarks) }
-
-    val presetTimes = listOf("08:30 AM", "08:45 AM", "09:00 AM", "09:15 AM", "09:30 AM")
 
     val customFieldsMap = remember(employee.customFieldsJson) {
         val map = mutableMapOf<String, String>()
@@ -140,44 +142,15 @@ fun AttendanceStaffDialog(
                 }
 
                 if (isPresent) {
-                    // Time input
-                    OutlinedTextField(
-                        value = timeText,
-                        onValueChange = { timeText = it },
-                        label = { Text("Attendance Time (Hours : Minutes AM/PM)") },
-                        leadingIcon = {
-                            Icon(Icons.Default.AccessTime, contentDescription = null)
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("input_staff_time")
-                    )
-
-                    // Quick Time Chips
-                    Text(
-                        text = "Quick Presets:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        presetTimes.take(3).forEach { t ->
-                            FilterChip(
-                                selected = timeText == t,
-                                onClick = { timeText = t },
-                                label = { Text(t, fontSize = 11.sp) }
-                            )
+                    TimeInputComponent(
+                        initialTime = timeText,
+                        initialTimestamp = timeTimestamp,
+                        is24Hour = is24HourFormat,
+                        onTimeChange = { formatted, ts ->
+                            timeText = formatted
+                            timeTimestamp = ts
                         }
-                        FilterChip(
-                            selected = false,
-                            onClick = {
-                                timeText = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
-                            },
-                            label = { Text("Now", fontSize = 11.sp) }
-                        )
-                    }
+                    )
                 }
 
                 if (customFieldsMap.isNotEmpty()) {
@@ -220,7 +193,7 @@ fun AttendanceStaffDialog(
             Button(
                 onClick = {
                     val finalPresent = if (isFutureDate) false else isPresent
-                    onSave(finalPresent, if (finalPresent) timeText else "", remarks)
+                    onSave(finalPresent, if (finalPresent) timeText else "", remarks, if (finalPresent) timeTimestamp else 0L)
                 },
                 modifier = Modifier.testTag("btn_save_staff_attendance")
             ) {
@@ -234,5 +207,28 @@ fun AttendanceStaffDialog(
                 Text("Cancel")
             }
         }
+    )
+}
+
+@Composable
+fun AttendanceStaffDialog(
+    employee: Employee,
+    currentPresence: Boolean,
+    currentTime: String,
+    currentRemarks: String,
+    isFutureDate: Boolean = false,
+    onDismiss: () -> Unit,
+    onSave: (isPresent: Boolean, attendanceTime: String, remarks: String) -> Unit
+) {
+    AttendanceStaffDialog(
+        employee = employee,
+        currentPresence = currentPresence,
+        currentTime = currentTime,
+        currentRemarks = currentRemarks,
+        currentTimestamp = 0L,
+        is24HourFormat = false,
+        isFutureDate = isFutureDate,
+        onDismiss = onDismiss,
+        onSave = { p, t, r, _ -> onSave(p, t, r) }
     )
 }

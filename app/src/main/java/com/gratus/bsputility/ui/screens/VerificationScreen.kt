@@ -6,6 +6,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -96,10 +97,9 @@ fun VerificationScreen(
         presentLabourers.groupBy { it.effectiveDepartment }
     }
 
-    // Configured departments
-    val allDepts = remember(configItems, deptMap) {
-        val configured = configItems.filter { it.category == "DEPARTMENT" }.map { it.name }
-        (configured + deptMap.keys).distinct().filter { it.isNotBlank() }
+    // Only departments that have active/present workers on this date (Issue #4)
+    val allDepts = remember(deptMap) {
+        deptMap.keys.filter { it.isNotBlank() && it != "Unassigned" && (deptMap[it]?.isNotEmpty() == true) }.sorted()
     }
 
     val verifMap = remember(verifications) {
@@ -201,29 +201,62 @@ fun VerificationScreenContent(
         }
 
         // --- 2. DEPARTMENT VERIFICATION LIST ---
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(allDepts) { deptName ->
-                val labourInDept = deptMap[deptName] ?: emptyList()
-                val verif = verifMap[deptName]
-
-                DepartmentVerificationCard(
-                    departmentName = deptName,
-                    labourList = labourInDept,
-                    verification = verif,
-                    staffList = staffList,
-                    onVerify = { staffId, staffName, isVerified, remarks ->
-                        onVerify(deptName, staffId, staffName, isVerified, remarks)
-                    }
-                )
+        if (allDepts.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.VerifiedUser,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Text(
+                        text = "No Active Departments",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "No departments have active workers on this date. Allocate workers or mark attendance to verify manpower.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
             }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(allDepts) { deptName ->
+                    val labourInDept = deptMap[deptName] ?: emptyList()
+                    val verif = verifMap[deptName]
 
-            item {
-                Spacer(modifier = Modifier.height(80.dp))
+                    DepartmentVerificationCard(
+                        departmentName = deptName,
+                        labourList = labourInDept,
+                        verification = verif,
+                        staffList = staffList,
+                        onVerify = { staffId, staffName, isVerified, remarks ->
+                            onVerify(deptName, staffId, staffName, isVerified, remarks)
+                        }
+                    )
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(80.dp))
+                }
             }
         }
     }

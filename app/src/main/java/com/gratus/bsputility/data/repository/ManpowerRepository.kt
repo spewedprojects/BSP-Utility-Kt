@@ -97,6 +97,44 @@ class ManpowerRepository(private val dao: EmployeeDao) {
         return dao.insertConfigItem(item)
     }
 
+    suspend fun clearStaffContractorAssociations(): Int {
+        val empCount = dao.clearStaffContractorAssociations()
+        val attCount = dao.clearStaffAttendanceContractors()
+        return empCount + attCount
+    }
+
+    suspend fun migrateLegacyTimeRecords(): Int {
+        val unmigrated = dao.getUnmigratedTimeRecords()
+        if (unmigrated.isEmpty()) return 0
+
+        val formats = listOf(
+            SimpleDateFormat("yyyy-MM-dd hh:mm a", Locale.getDefault()),
+            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()),
+            SimpleDateFormat("yyyy-MM-dd h:mm a", Locale.getDefault())
+        )
+
+        val updated = unmigrated.mapNotNull { att ->
+            var timestamp = 0L
+            for (format in formats) {
+                try {
+                    val d = format.parse("${att.date} ${att.attendanceTime.trim()}")
+                    if (d != null) {
+                        timestamp = d.time
+                        break
+                    }
+                } catch (_: Exception) {}
+            }
+            if (timestamp != 0L) {
+                att.copy(attendanceTimestamp = timestamp)
+            } else null
+        }
+
+        if (updated.isNotEmpty()) {
+            dao.updateDailyAttendanceBatch(updated)
+        }
+        return updated.size
+    }
+
     suspend fun deleteConfigItem(item: ConfigItem) {
         dao.deleteConfigItem(item)
     }

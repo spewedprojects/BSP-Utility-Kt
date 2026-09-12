@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -33,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -67,11 +69,24 @@ fun MasterDataScreen(
     val contractors by viewModel.allContractors.collectAsStateWithLifecycle()
     val allConfigs by viewModel.allConfigItems.collectAsStateWithLifecycle()
     val allEmployees by viewModel.allEmployees.collectAsStateWithLifecycle()
+    val is24Hour by viewModel.is24HourFormat.collectAsStateWithLifecycle()
 
     MasterDataScreenContent(
         contractors = contractors,
         allConfigs = allConfigs,
         allEmployees = allEmployees,
+        is24Hour = is24Hour,
+        onToggle24Hour = { viewModel.set24HourFormat(it) },
+        onClearStaffContractors = {
+            viewModel.clearStaffContractorAssociations { count ->
+                Toast.makeText(context, "Sanitized staff data: $count associations removed", Toast.LENGTH_LONG).show()
+            }
+        },
+        onMigrateTimeData = {
+            viewModel.migrateLegacyTimeRecords { count ->
+                Toast.makeText(context, "Migrated $count time records to timestamps", Toast.LENGTH_LONG).show()
+            }
+        },
         onAddContractor = { viewModel.addContractor(it) },
         onUpdateContractor = { viewModel.updateContractor(it) },
         onDeleteContractor = {
@@ -92,6 +107,10 @@ fun MasterDataScreenContent(
     contractors: List<Contractor>,
     allConfigs: List<ConfigItem>,
     allEmployees: List<Employee>,
+    is24Hour: Boolean = false,
+    onToggle24Hour: (Boolean) -> Unit = {},
+    onClearStaffContractors: () -> Unit = {},
+    onMigrateTimeData: () -> Unit = {},
     onAddContractor: (Contractor) -> Unit,
     onUpdateContractor: (Contractor) -> Unit,
     onDeleteContractor: (Contractor) -> Unit,
@@ -101,7 +120,7 @@ fun MasterDataScreenContent(
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(initialTab) }
-    val tabs = listOf("Contractors", "Departments", "Designations", "Units", "Shifts", "Labour Roles", "Custom Fields")
+    val tabs = listOf("Contractors", "Departments", "Designations", "Units", "Shifts", "Labour Roles", "Custom Fields", "Preferences")
 
     // Modals
     var showAddContractorDialog by remember { mutableStateOf<Contractor?>(null) }
@@ -224,6 +243,132 @@ fun MasterDataScreenContent(
                             }
                         }
                     }
+                } else if (selectedTab == "Preferences") {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.AccessTime,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                    Text(
+                                        text = "Time Format",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
+                                    )
+                                }
+                                Text(
+                                    text = "Choose 12-hour (AM/PM) or 24-hour time format for marking staff attendance times.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        RadioButton(
+                                            selected = !is24Hour,
+                                            onClick = { onToggle24Hour(false) },
+                                            modifier = Modifier.testTag("radio_12_hour")
+                                        )
+                                        Text(
+                                            text = "12-Hour (08:30 AM)",
+                                            fontSize = 13.sp,
+                                            modifier = Modifier.padding(start = 4.dp)
+                                        )
+                                    }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        RadioButton(
+                                            selected = is24Hour,
+                                            onClick = { onToggle24Hour(true) },
+                                            modifier = Modifier.testTag("radio_24_hour")
+                                        )
+                                        Text(
+                                            text = "24-Hour (08:30)",
+                                            fontSize = 13.sp,
+                                            modifier = Modifier.padding(start = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Settings,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                    Text(
+                                        text = "Data Integrity & Maintenance",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
+                                    )
+                                }
+                                Text(
+                                    text = "Maintain database consistency and clean up legacy data associations.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                                )
+
+                                OutlinedButton(
+                                    onClick = onClearStaffContractors,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("btn_clear_staff_contractors")
+                                ) {
+                                    Text("Clear Staff Contractor Links")
+                                }
+                                Text(
+                                    text = "Ensures no staff members are erroneously tied to any contractor in the rooster or attendance records.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 12.dp)
+                                )
+
+                                OutlinedButton(
+                                    onClick = onMigrateTimeData,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("btn_migrate_time_data")
+                                ) {
+                                    Text("Migrate Legacy Time Records")
+                                }
+                                Text(
+                                    text = "Converts legacy string time records (e.g., '08:30 AM') into standard epoch timestamps.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                                )
+                            }
+                        }
+                    }
                 } else {
                     // Category Items (Departments, Designations, Units, Shifts, Labour Roles, Custom Fields)
                     val catKey = when (selectedTab) {
@@ -302,32 +447,34 @@ fun MasterDataScreenContent(
             }
         }
 
-        FloatingActionButton(
-            onClick = {
-                if (selectedTab == "Contractors") {
-                    isNewContractor = true
-                    showAddContractorDialog =
-                        Contractor(name = "", contactPerson = "", phone = "", notes = "")
-                } else {
-                    newConfigCategory = when (selectedTab) {
-                        "Departments" -> "DEPARTMENT"
-                        "Designations" -> "DESIGNATION"
-                        "Units" -> "UNIT"
-                        "Shifts" -> "SHIFT"
-                        "Labour Roles" -> "LABOUR_ROLE"
-                        else -> "CUSTOM_FIELD"
+        if (selectedTab != "Preferences") {
+            FloatingActionButton(
+                onClick = {
+                    if (selectedTab == "Contractors") {
+                        isNewContractor = true
+                        showAddContractorDialog =
+                            Contractor(name = "", contactPerson = "", phone = "", notes = "")
+                    } else {
+                        newConfigCategory = when (selectedTab) {
+                            "Departments" -> "DEPARTMENT"
+                            "Designations" -> "DESIGNATION"
+                            "Units" -> "UNIT"
+                            "Shifts" -> "SHIFT"
+                            "Labour Roles" -> "LABOUR_ROLE"
+                            else -> "CUSTOM_FIELD"
+                        }
+                        showAddConfigDialog = true
                     }
-                    showAddConfigDialog = true
-                }
-            },
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp)
-                .testTag("fab_add_master_item")
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Add Item")
+                },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+                    .testTag("fab_add_master_item")
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add Item")
+            }
         }
     }
 
@@ -569,6 +716,28 @@ fun MasterDataScreenPreview_CustomFields() {
             onAddConfigItem = { _, _, _ -> },
             onDeleteConfigItem = {},
             initialTab = "Custom Fields"
+        )
+    }
+}
+
+@Preview(name = "Master Data - Preferences", showBackground = true)
+@Composable
+fun MasterDataScreenPreview_Preferences() {
+    MyApplicationTheme {
+        MasterDataScreenContent(
+            contractors = PreviewData.sampleContractors,
+            allConfigs = PreviewData.sampleConfigItems,
+            allEmployees = PreviewData.sampleEmployees,
+            is24Hour = false,
+            onToggle24Hour = {},
+            onClearStaffContractors = {},
+            onMigrateTimeData = {},
+            onAddContractor = {},
+            onUpdateContractor = {},
+            onDeleteContractor = {},
+            onAddConfigItem = { _, _, _ -> },
+            onDeleteConfigItem = {},
+            initialTab = "Preferences"
         )
     }
 }

@@ -24,7 +24,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -140,9 +142,9 @@ fun RoosterScreen(
         searchQuery = searchQuery,
         onSearchQueryChange = { viewModel.roosterSearchQuery.value = it },
         filterStatus = filterStatus,
-        onFilterStatusChange = { viewModel.roosterFilterStatus.value = it },
+        onFilterStatusChange = { viewModel.setRoosterFilterStatus(it) },
         filterContractor = filterContractor,
-        onFilterContractorChange = { viewModel.roosterFilterContractor.value = it },
+        onFilterContractorChange = { viewModel.setRoosterFilterContractor(it) },
         filterDepartment = filterDepartment,
         onFilterDepartmentChange = { viewModel.roosterFilterDepartment.value = it },
         collapsedGroups = collapsedGroups,
@@ -227,8 +229,11 @@ fun RoosterScreenContent(
                 else -> true
             }
 
-            val matchesContractor = filterContractor == null ||
-                emp.contractorName.equals(filterContractor, ignoreCase = true)
+            val matchesContractor = when (filterContractor) {
+                null -> true
+                "ALL_CONTRACTORS" -> emp.contractorName.isNotBlank() && emp.type != EmployeeTypes.STAFF
+                else -> emp.contractorName.equals(filterContractor, ignoreCase = true) && emp.type != EmployeeTypes.STAFF
+            }
 
             val matchesDepartment = filterDepartment == null ||
                 emp.permanentDepartment.equals(filterDepartment, ignoreCase = true)
@@ -264,48 +269,47 @@ fun RoosterScreenContent(
                     ) {
                         Column {
                             Text(
-                                text = "Employee Library (Rooster)",
+                                text = "Employee Roster",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 17.sp
+                                    fontSize = 18.sp
                                 )
                             )
                             Text(
-                                text = "${allEmployees.size} total registered employees",
+                                text = "${allEmployees.size} total personnel in database",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            // Quick Paste Names Import
-                            OutlinedButton(
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // Quick Paste Button
+                            IconButton(
                                 onClick = { showPasteImportDialog = true },
-                                modifier = Modifier.testTag("btn_paste_import")
+                                modifier = Modifier.testTag("btn_quick_paste_import")
                             ) {
-                                Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Paste", fontSize = 12.sp)
+                                Icon(Icons.Default.ContentPaste, contentDescription = "Quick Paste Import", tint = MaterialTheme.colorScheme.primary)
                             }
-
-                            // Full Backup / Restore
+                            // JSON / CSV Import/Export Button
                             IconButton(
                                 onClick = { showJsonExportImportDialog = true },
-                                modifier = Modifier.testTag("btn_backup_restore")
+                                modifier = Modifier.testTag("btn_export_import_json")
                             ) {
-                                Icon(Icons.Default.Download, contentDescription = "Backup/Export", tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.FileDownload, contentDescription = "Export / Import Data", tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Search Input
+                    // Search input
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = onSearchQueryChange,
-                        placeholder = { Text("Search library by name, dept, contractor...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        placeholder = { Text("Search name, dept, contractor, role...") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary)
+                        },
                         trailingIcon = {
                             if (searchQuery.isNotBlank()) {
                                 IconButton(onClick = { onSearchQueryChange("") }) {
@@ -332,20 +336,30 @@ fun RoosterScreenContent(
                         items(filters) { f ->
                             FilterChip(
                                 selected = filterStatus == f,
-                                onClick = { onFilterStatusChange(f) },
+                                onClick = {
+                                    onFilterStatusChange(f)
+                                    if (f == "Staff") {
+                                        onFilterContractorChange(null)
+                                    }
+                                },
                                 label = { Text(f, fontSize = 12.sp) }
                             )
                         }
 
                         // Contractor filter dropdown chip
                         item {
+                            val contractorChipLabel = when (filterContractor) {
+                                null -> "Contractor"
+                                "ALL_CONTRACTORS" -> "All Contractors"
+                                else -> filterContractor
+                            }
                             Box {
                                 FilterChip(
                                     selected = filterContractor != null,
                                     onClick = { showContractorMenu = true },
                                     label = {
                                         Text(
-                                            text = filterContractor ?: "Contractor",
+                                            text = contractorChipLabel,
                                             fontSize = 12.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -360,9 +374,17 @@ fun RoosterScreenContent(
                                     onDismissRequest = { showContractorMenu = false }
                                 ) {
                                     DropdownMenuItem(
-                                        text = { Text("All Contractors") },
+                                        text = { Text("Clear Filter") },
                                         onClick = {
                                             onFilterContractorChange(null)
+                                            showContractorMenu = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("All Contractors") },
+                                        onClick = {
+                                            onFilterContractorChange("ALL_CONTRACTORS")
+                                            if (filterStatus == "Staff") onFilterStatusChange("All")
                                             showContractorMenu = false
                                         }
                                     )
@@ -371,6 +393,7 @@ fun RoosterScreenContent(
                                             text = { Text(c.name) },
                                             onClick = {
                                                 onFilterContractorChange(c.name)
+                                                if (filterStatus == "Staff") onFilterStatusChange("All")
                                                 showContractorMenu = false
                                             }
                                         )
@@ -586,12 +609,15 @@ fun RoosterScreenContent(
             customFields = customFields,
             onDismiss = { showAddEditDialog = null },
             onSave = { updated ->
+                val sanitized = if (updated.type == EmployeeTypes.STAFF) {
+                    updated.copy(contractorId = null, contractorName = "")
+                } else updated
                 if (isCreatingNew) {
-                    onAddEmployee(updated)
-                    Toast.makeText(context, "Added ${updated.name} to library", Toast.LENGTH_SHORT).show()
+                    onAddEmployee(sanitized)
+                    Toast.makeText(context, "Added ${sanitized.name} to library", Toast.LENGTH_SHORT).show()
                 } else {
-                    onUpdateEmployee(updated)
-                    Toast.makeText(context, "Updated ${updated.name}", Toast.LENGTH_SHORT).show()
+                    onUpdateEmployee(sanitized)
+                    Toast.makeText(context, "Updated ${sanitized.name}", Toast.LENGTH_SHORT).show()
                 }
                 showAddEditDialog = null
             }
@@ -1003,71 +1029,71 @@ fun AddEditEmployeeDialog(
                             }
                         }
                     }
+                }
 
-                    // Default Unit & Shift
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Unit", style = MaterialTheme.typography.labelMedium)
-                            Surface(
+                // Default Unit & Shift (Applies to both Staff and Labour)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Unit", style = MaterialTheme.typography.labelMedium)
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { unitExp = true },
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { unitExp = true },
-                                shape = RoundedCornerShape(4.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(unit, fontSize = 13.sp)
-                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                                }
-                                DropdownMenu(expanded = unitExp, onDismissRequest = { unitExp = false }) {
-                                    units.forEach { u ->
-                                        DropdownMenuItem(
-                                            text = { Text(u) },
-                                            onClick = {
-                                                unit = u
-                                                unitExp = false
-                                            }
-                                        )
-                                    }
+                                Text(unit, fontSize = 13.sp)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                            DropdownMenu(expanded = unitExp, onDismissRequest = { unitExp = false }) {
+                                units.forEach { u ->
+                                    DropdownMenuItem(
+                                        text = { Text(u) },
+                                        onClick = {
+                                            unit = u
+                                            unitExp = false
+                                        }
+                                    )
                                 }
                             }
                         }
+                    }
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Shift", style = MaterialTheme.typography.labelMedium)
-                            Surface(
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Shift", style = MaterialTheme.typography.labelMedium)
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { shiftExp = true },
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { shiftExp = true },
-                                shape = RoundedCornerShape(4.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(shift.ifBlank { availableShifts.firstOrNull() ?: "Shift A" }, fontSize = 13.sp)
-                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                                }
-                                DropdownMenu(expanded = shiftExp, onDismissRequest = { shiftExp = false }) {
-                                    availableShifts.forEach { s ->
-                                        DropdownMenuItem(
-                                            text = { Text(s) },
-                                            onClick = {
-                                                shift = s
-                                                shiftExp = false
-                                            }
-                                        )
-                                    }
+                                Text(shift.ifBlank { availableShifts.firstOrNull() ?: "Shift A" }, fontSize = 13.sp)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                            DropdownMenu(expanded = shiftExp, onDismissRequest = { shiftExp = false }) {
+                                availableShifts.forEach { s ->
+                                    DropdownMenuItem(
+                                        text = { Text(s) },
+                                        onClick = {
+                                            shift = s
+                                            shiftExp = false
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -1126,17 +1152,28 @@ fun AddEditEmployeeDialog(
                                         }
                                     )
                                 }
-                            } else {
+                            } else if (fieldType == "NUMBER") {
                                 OutlinedTextField(
                                     value = currentValue,
-                                    onValueChange = { newVal ->
+                                    onValueChange = { num ->
                                         customFieldValues = customFieldValues.toMutableMap().apply {
-                                            put(cf.name, newVal)
+                                            put(cf.name, num)
                                         }
                                     },
                                     label = { Text(cf.name) },
                                     modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                )
+                            } else {
+                                OutlinedTextField(
+                                    value = currentValue,
+                                    onValueChange = { txt ->
+                                        customFieldValues = customFieldValues.toMutableMap().apply {
+                                            put(cf.name, txt)
+                                        }
+                                    },
+                                    label = { Text(cf.name) },
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
                         }
@@ -1159,9 +1196,10 @@ fun AddEditEmployeeDialog(
                             type = type,
                             status = status,
                             permanentDepartment = if (type == EmployeeTypes.STAFF) (department.ifBlank { departments.firstOrNull() ?: "" }).trim() else "",
-                            designation = designation.trim(),
-                            contractorName = contractorName,
-                            defaultWorkRole = workRole,
+                            designation = if (type == EmployeeTypes.STAFF) designation.trim() else "",
+                            contractorId = if (type == EmployeeTypes.STAFF) null else contractors.find { it.name.equals(contractorName, ignoreCase = true) }?.id,
+                            contractorName = if (type == EmployeeTypes.STAFF) "" else contractorName,
+                            defaultWorkRole = if (type != EmployeeTypes.STAFF) workRole else "",
                             defaultUnit = unit,
                             defaultShift = shift.ifBlank { availableShifts.firstOrNull() ?: "Shift A" },
                             permanentRemarks = remarks.trim(),
@@ -1239,22 +1277,39 @@ fun PasteImportDialog(
                     }
                 }
 
-                if (targetType == EmployeeTypes.LABOUR) {
+                if (targetType != EmployeeTypes.STAFF) {
+                    var contractorMenuExp by remember { mutableStateOf(false) }
                     Text("Select Contractor:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    contractors.forEach { c ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { contractorMenuExp = true },
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { selectedContractor = c.name }
-                                .padding(vertical = 4.dp)
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            RadioButton(
-                                selected = selectedContractor == c.name,
-                                onClick = { selectedContractor = c.name }
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(c.name, fontSize = 13.sp)
+                            Text(selectedContractor.ifBlank { "Select Contractor" }, fontSize = 13.sp)
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                        }
+                        DropdownMenu(
+                            expanded = contractorMenuExp,
+                            onDismissRequest = { contractorMenuExp = false }
+                        ) {
+                            contractors.forEach { c ->
+                                DropdownMenuItem(
+                                    text = { Text(c.name) },
+                                    onClick = {
+                                        selectedContractor = c.name
+                                        contractorMenuExp = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -1263,12 +1318,13 @@ fun PasteImportDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val contractorObj = contractors.find { it.name == selectedContractor }
+                    val contractorObj = if (targetType == EmployeeTypes.STAFF) null else contractors.find { it.name == selectedContractor }
+                    val finalContractorName = if (targetType == EmployeeTypes.STAFF) "" else selectedContractor
                     onImport(
                         namesText,
                         targetType,
                         contractorObj?.id,
-                        selectedContractor,
+                        finalContractorName,
                         selectedDept,
                         selectedRole
                     )

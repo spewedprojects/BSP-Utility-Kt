@@ -97,6 +97,8 @@ fun AttendanceScreen(
     val contractors by viewModel.allContractors.collectAsStateWithLifecycle()
     val configItems by viewModel.allConfigItems.collectAsStateWithLifecycle()
     val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
+    val areAllPresent by viewModel.areAllActivePresent.collectAsStateWithLifecycle()
+    val is24Hour by viewModel.is24HourFormat.collectAsStateWithLifecycle()
 
     val searchQuery by viewModel.attendanceSearchQuery.collectAsStateWithLifecycle()
     val filterType by viewModel.attendanceFilterType.collectAsStateWithLifecycle()
@@ -126,18 +128,20 @@ fun AttendanceScreen(
         units = units,
         shifts = shifts,
         selectedDate = selectedDate,
+        areAllPresent = areAllPresent,
+        is24HourFormat = is24Hour,
         searchQuery = searchQuery,
         onSearchQueryChange = { viewModel.attendanceSearchQuery.value = it },
         filterType = filterType,
-        onFilterTypeChange = { viewModel.attendanceFilterType.value = it },
+        onFilterTypeChange = { viewModel.setAttendanceFilterType(it) },
         filterContractor = filterContractor,
-        onFilterContractorChange = { viewModel.attendanceFilterContractor.value = it },
+        onFilterContractorChange = { viewModel.setAttendanceFilterContractor(it) },
         filterDepartment = filterDepartment,
         onFilterDepartmentChange = { viewModel.attendanceFilterDepartment.value = it },
         onMarkAllPresent = { viewModel.markAllActivePresent() },
         onTogglePresence = { viewModel.toggleAttendance(it) },
-        onSaveStaffAttendance = { emp, isPresent, time, remarks ->
-            viewModel.updateStaffDailyAttendance(emp, isPresent, time, remarks)
+        onSaveStaffAttendance = { emp, isPresent, time, remarks, timestamp ->
+            viewModel.updateStaffDailyAttendance(emp, isPresent, time, remarks, timestamp)
         },
         onSaveLabourAssignment = { emp, isPresent, dept, role, contractor, unit, shift, remarks ->
             viewModel.updateLabourDailyAssignment(
@@ -166,6 +170,8 @@ fun AttendanceScreenContent(
     units: List<String>,
     shifts: List<String> = listOf("Shift A", "Shift B", "Shift C", "General"),
     selectedDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+    areAllPresent: Boolean = false,
+    is24HourFormat: Boolean = false,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     filterType: String,
@@ -176,7 +182,7 @@ fun AttendanceScreenContent(
     onFilterDepartmentChange: (String?) -> Unit,
     onMarkAllPresent: () -> Unit,
     onTogglePresence: (ManpowerViewModel.EmployeeAttendanceItem) -> Unit,
-    onSaveStaffAttendance: (employee: Employee, isPresent: Boolean, time: String, remarks: String) -> Unit,
+    onSaveStaffAttendance: (employee: Employee, isPresent: Boolean, time: String, remarks: String, timestamp: Long) -> Unit,
     onSaveLabourAssignment: (
         employee: Employee,
         isPresent: Boolean,
@@ -244,14 +250,36 @@ fun AttendanceScreenContent(
                     }
                 }
 
-                OutlinedButton(
+                Button(
                     onClick = onMarkAllPresent,
                     enabled = !isFutureDate,
+                    colors = if (areAllPresent) {
+                        ButtonDefaults.buttonColors(
+                            containerColor = PresentGreen,
+                            contentColor = Color.White
+                        )
+                    } else {
+                        ButtonDefaults.outlinedButtonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    border = if (areAllPresent) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                     modifier = Modifier.testTag("btn_mark_all_present")
                 ) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = if (areAllPresent) Color.White else MaterialTheme.colorScheme.primary
+                    )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Mark All", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = if (areAllPresent) "All Present (Undo)" else "Mark All",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (areAllPresent) Color.White else MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }
@@ -329,7 +357,12 @@ fun AttendanceScreenContent(
                     items(filterChips) { filter ->
                         FilterChip(
                             selected = filterType == filter,
-                            onClick = { onFilterTypeChange(filter) },
+                            onClick = {
+                                onFilterTypeChange(filter)
+                                if (filter == "Staff") {
+                                    onFilterContractorChange(null)
+                                }
+                            },
                             label = { Text(filter, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
                             modifier = Modifier.testTag("filter_chip_$filter")
                         )
@@ -337,13 +370,18 @@ fun AttendanceScreenContent(
 
                     // Contractor filter dropdown chip
                     item {
+                        val contractorChipLabel = when (filterContractor) {
+                            null -> "Contractor"
+                            "ALL_CONTRACTORS" -> "All Contractors"
+                            else -> filterContractor
+                        }
                         Box {
                             FilterChip(
                                 selected = filterContractor != null,
                                 onClick = { showContractorMenu = true },
                                 label = {
                                     Text(
-                                        text = filterContractor ?: "Contractor",
+                                        text = contractorChipLabel,
                                         fontSize = 12.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -358,9 +396,17 @@ fun AttendanceScreenContent(
                                 onDismissRequest = { showContractorMenu = false }
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("All Contractors") },
+                                    text = { Text("Clear Filter") },
                                     onClick = {
                                         onFilterContractorChange(null)
+                                        showContractorMenu = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("All Contractors") },
+                                    onClick = {
+                                        onFilterContractorChange("ALL_CONTRACTORS")
+                                        if (filterType == "Staff") onFilterTypeChange("All")
                                         showContractorMenu = false
                                     }
                                 )
@@ -369,6 +415,7 @@ fun AttendanceScreenContent(
                                         text = { Text(c.name) },
                                         onClick = {
                                             onFilterContractorChange(c.name)
+                                            if (filterType == "Staff") onFilterTypeChange("All")
                                             showContractorMenu = false
                                         }
                                     )
@@ -483,10 +530,12 @@ fun AttendanceScreenContent(
                 currentPresence = item.isPresent,
                 currentTime = item.attendanceTime,
                 currentRemarks = item.dayRemarks,
+                currentTimestamp = item.attendanceTimestamp,
+                is24HourFormat = is24HourFormat,
                 isFutureDate = isFutureDate,
                 onDismiss = { selectedItemForDialog = null },
-                onSave = { isPresent, time, remarks ->
-                    onSaveStaffAttendance(item.employee, isPresent, time, remarks)
+                onSave = { isPresent, time, remarks, timestamp ->
+                    onSaveStaffAttendance(item.employee, isPresent, time, remarks, timestamp)
                     selectedItemForDialog = null
                 }
             )
@@ -576,6 +625,71 @@ fun AttendanceScreenContent(
             }
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AttendanceScreenContent(
+    items: List<ManpowerViewModel.EmployeeAttendanceItem>,
+    summary: ManpowerSummary,
+    contractors: List<Contractor>,
+    departments: List<String>,
+    roles: List<String>,
+    units: List<String>,
+    shifts: List<String> = listOf("Shift A", "Shift B", "Shift C", "General"),
+    selectedDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+    areAllPresent: Boolean = false,
+    is24HourFormat: Boolean = false,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    filterType: String,
+    onFilterTypeChange: (String) -> Unit,
+    filterContractor: String?,
+    onFilterContractorChange: (String?) -> Unit,
+    filterDepartment: String?,
+    onFilterDepartmentChange: (String?) -> Unit,
+    onMarkAllPresent: () -> Unit,
+    onTogglePresence: (ManpowerViewModel.EmployeeAttendanceItem) -> Unit,
+    onSaveStaffAttendance: (employee: Employee, isPresent: Boolean, time: String, remarks: String) -> Unit,
+    onSaveLabourAssignment: (
+        employee: Employee,
+        isPresent: Boolean,
+        department: String,
+        workRole: String,
+        contractor: String,
+        unit: String,
+        shift: String,
+        remarks: String
+    ) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AttendanceScreenContent(
+        items = items,
+        summary = summary,
+        contractors = contractors,
+        departments = departments,
+        roles = roles,
+        units = units,
+        shifts = shifts,
+        selectedDate = selectedDate,
+        areAllPresent = areAllPresent,
+        is24HourFormat = is24HourFormat,
+        searchQuery = searchQuery,
+        onSearchQueryChange = onSearchQueryChange,
+        filterType = filterType,
+        onFilterTypeChange = onFilterTypeChange,
+        filterContractor = filterContractor,
+        onFilterContractorChange = onFilterContractorChange,
+        filterDepartment = filterDepartment,
+        onFilterDepartmentChange = onFilterDepartmentChange,
+        onMarkAllPresent = onMarkAllPresent,
+        onTogglePresence = onTogglePresence,
+        onSaveStaffAttendance = { emp, isPresent, time, remarks, _ ->
+            onSaveStaffAttendance(emp, isPresent, time, remarks)
+        },
+        onSaveLabourAssignment = onSaveLabourAssignment,
+        modifier = modifier
+    )
 }
 
 @Composable

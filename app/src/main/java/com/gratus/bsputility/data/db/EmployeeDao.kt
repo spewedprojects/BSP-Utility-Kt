@@ -48,8 +48,20 @@ interface EmployeeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAttendanceBatch(records: List<DailyAttendance>)
 
+    @Update
+    suspend fun updateDailyAttendanceBatch(records: List<DailyAttendance>)
+
     @Query("DELETE FROM daily_attendance WHERE date = :date AND employeeId = :employeeId")
     suspend fun deleteAttendance(date: String, employeeId: Long)
+
+    @Query("UPDATE employees SET contractorId = NULL, contractorName = '' WHERE type = 'Staff'")
+    suspend fun clearStaffContractorAssociations(): Int
+
+    @Query("UPDATE daily_attendance SET dayContractorName = '' WHERE employeeType = 'Staff'")
+    suspend fun clearStaffAttendanceContractors(): Int
+
+    @Query("SELECT * FROM daily_attendance WHERE attendanceTimestamp = 0 AND attendanceTime != ''")
+    suspend fun getUnmigratedTimeRecords(): List<DailyAttendance>
 
     // --- DEPARTMENT VERIFICATIONS ---
     @Query("SELECT * FROM department_verifications WHERE date = :date ORDER BY departmentName ASC")

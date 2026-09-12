@@ -1,6 +1,7 @@
 package com.gratus.bsputility.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.gratus.bsputility.data.db.AppDatabase
@@ -33,6 +34,16 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     private val repository: ManpowerRepository
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
+    // SharedPreferences for persistent settings
+    private val prefs = application.getSharedPreferences("bsp_manpower_prefs", Context.MODE_PRIVATE)
+    private val _is24HourFormat = MutableStateFlow(prefs.getBoolean("pref_is_24_hour", false))
+    val is24HourFormat: StateFlow<Boolean> = _is24HourFormat.asStateFlow()
+
+    fun set24HourFormat(enabled: Boolean) {
+        _is24HourFormat.value = enabled
+        prefs.edit().putBoolean("pref_is_24_hour", enabled).apply()
+    }
+
     private val _selectedDate = MutableStateFlow(dateFormat.format(Date()))
     val selectedDate: StateFlow<String> = _selectedDate.asStateFlow()
 
@@ -48,6 +59,35 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     val roosterFilterContractor = MutableStateFlow<String?>(null)
     val roosterFilterDepartment = MutableStateFlow<String?>(null)
     val collapsedGroups = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+
+    // Mutual exclusivity mutators
+    fun setAttendanceFilterType(type: String) {
+        attendanceFilterType.value = type
+        if (type == "Staff") {
+            attendanceFilterContractor.value = null
+        }
+    }
+
+    fun setAttendanceFilterContractor(contractor: String?) {
+        attendanceFilterContractor.value = contractor
+        if (contractor != null && attendanceFilterType.value == "Staff") {
+            attendanceFilterType.value = "All"
+        }
+    }
+
+    fun setRoosterFilterStatus(status: String) {
+        roosterFilterStatus.value = status
+        if (status == "Staff") {
+            roosterFilterContractor.value = null
+        }
+    }
+
+    fun setRoosterFilterContractor(contractor: String?) {
+        roosterFilterContractor.value = contractor
+        if (contractor != null && roosterFilterStatus.value == "Staff") {
+            roosterFilterStatus.value = "All"
+        }
+    }
 
     init {
         val db = AppDatabase.getDatabase(application)
@@ -71,10 +111,13 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     private val _verificationStream = MutableStateFlow<List<DepartmentVerification>>(emptyList())
     val verificationRecords: StateFlow<List<DepartmentVerification>> = _verificationStream.asStateFlow()
 
+    private var preMarkAllSnapshot: List<DailyAttendance>? = null
+
     init {
         // Collect attendance whenever selectedDate changes using collectLatest to cancel previous date
         viewModelScope.launch {
             selectedDate.collectLatest { date ->
+                preMarkAllSnapshot = null
                 _attendanceStream.value = emptyList()
                 repository.getAttendanceForDate(date).collect { list ->
                     _attendanceStream.value = list
@@ -145,6 +188,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         val effectiveUnit: String,
         val effectiveShift: String,
         val attendanceTime: String,
+        val attendanceTimestamp: Long = 0L,
         val dayRemarks: String,
         val attendanceId: Long?
     )
@@ -180,10 +224,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 effectiveDepartment = att?.dayDepartment?.ifBlank { null }
                     ?: emp.permanentDepartment.ifBlank { "Unassigned" },
                 effectiveWorkRole = att?.dayWorkRole ?: emp.defaultWorkRole,
-                effectiveContractor = att?.dayContractorName ?: emp.contractorName,
+                effectiveContractor = if (emp.type == EmployeeTypes.STAFF) "" else (att?.dayContractorName ?: emp.contractorName),
                 effectiveUnit = att?.dayUnit ?: emp.defaultUnit,
                 effectiveShift = att?.dayShift ?: emp.defaultShift,
                 attendanceTime = att?.attendanceTime ?: "",
+                attendanceTimestamp = att?.attendanceTimestamp ?: 0L,
                 dayRemarks = att?.dayRemarks ?: "",
                 attendanceId = att?.id
             )
@@ -205,7 +250,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 else -> true
             }
 
-            val matchesContractor = filterContractor == null || item.effectiveContractor.equals(filterContractor, ignoreCase = true)
+            val matchesContractor = when (filterContractor) {
+                null -> true
+                "ALL_CONTRACTORS" -> item.effectiveContractor.isNotBlank() && item.employee.type != EmployeeTypes.STAFF
+                else -> item.effectiveContractor.equals(filterContractor, ignoreCase = true) && item.employee.type != EmployeeTypes.STAFF
+            }
             val matchesDept = filterDept == null || item.effectiveDepartment.equals(filterDept, ignoreCase = true)
 
             matchesQuery && matchesType && matchesContractor && matchesDept
@@ -287,15 +336,35 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ManpowerSummary())
 
     // --- ATTENDANCE ACTIONS ---
+    val areAllActivePresent: StateFlow<Boolean> = combine(
+        allEmployees,
+        _attendanceStream
+    ) { employees, attendance ->
+        val activeEmps = employees.filter { it.status == EmployeeStatuses.ACTIVE }
+        if (activeEmps.isEmpty()) false
+        else {
+            val attMap = attendance.associateBy { it.employeeId }
+            activeEmps.all { attMap[it.id]?.isPresent == true }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     fun toggleAttendance(item: EmployeeAttendanceItem) {
         if (isDateInFuture(_selectedDate.value)) return
         viewModelScope.launch {
             val newPresence = !item.isPresent
+            val nowMillis = System.currentTimeMillis()
+            val timeFormat = if (_is24HourFormat.value) SimpleDateFormat("HH:mm", Locale.getDefault()) else SimpleDateFormat("hh:mm a", Locale.getDefault())
             val defaultTime = if (newPresence && item.employee.type == EmployeeTypes.STAFF && item.attendanceTime.isBlank()) {
-                SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+                timeFormat.format(Date(nowMillis))
             } else if (!newPresence) {
                 ""
             } else item.attendanceTime
+
+            val newTimestamp = if (newPresence && item.employee.type == EmployeeTypes.STAFF) {
+                if (item.attendanceTimestamp != 0L) item.attendanceTimestamp else nowMillis
+            } else if (!newPresence) {
+                0L
+            } else item.attendanceTimestamp
 
             val record = DailyAttendance(
                 id = item.attendanceId ?: 0,
@@ -306,10 +375,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 isPresent = newPresence,
                 dayDepartment = item.effectiveDepartment,
                 dayWorkRole = item.effectiveWorkRole,
-                dayContractorName = item.effectiveContractor,
+                dayContractorName = if (item.employee.type == EmployeeTypes.STAFF) "" else item.effectiveContractor,
                 dayUnit = item.effectiveUnit,
                 dayShift = item.effectiveShift,
                 attendanceTime = defaultTime,
+                attendanceTimestamp = newTimestamp,
                 dayRemarks = item.dayRemarks
             )
             repository.markAttendance(record)
@@ -342,6 +412,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 dayUnit = unit,
                 dayShift = shift,
                 attendanceTime = existing?.attendanceTime ?: "",
+                attendanceTimestamp = existing?.attendanceTimestamp ?: 0L,
                 dayRemarks = remarks
             )
             repository.markAttendance(record)
@@ -352,11 +423,30 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         employee: Employee,
         isPresent: Boolean,
         attendanceTime: String,
-        remarks: String
+        remarks: String,
+        attendanceTimestamp: Long = 0L
     ) {
         if (isDateInFuture(_selectedDate.value)) return
         viewModelScope.launch {
             val existing = _attendanceStream.value.find { it.employeeId == employee.id && it.date == _selectedDate.value }
+            val nowMillis = System.currentTimeMillis()
+            val finalTimestamp = if (isPresent) {
+                if (attendanceTimestamp != 0L) attendanceTimestamp
+                else {
+                    var parsedTs = 0L
+                    try {
+                        val format = if (attendanceTime.contains("AM", ignoreCase = true) || attendanceTime.contains("PM", ignoreCase = true)) {
+                            SimpleDateFormat("yyyy-MM-dd hh:mm a", Locale.getDefault())
+                        } else {
+                            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+                        }
+                        val d = format.parse("${_selectedDate.value} ${attendanceTime.trim()}")
+                        if (d != null) parsedTs = d.time
+                    } catch (_: Exception) {}
+                    if (parsedTs != 0L) parsedTs else nowMillis
+                }
+            } else 0L
+
             val record = DailyAttendance(
                 id = existing?.id ?: 0,
                 date = _selectedDate.value,
@@ -370,6 +460,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 dayUnit = employee.defaultUnit,
                 dayShift = employee.defaultShift,
                 attendanceTime = if (isPresent) attendanceTime else "",
+                attendanceTimestamp = finalTimestamp,
                 dayRemarks = remarks
             )
             repository.markAttendance(record)
@@ -380,29 +471,67 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         if (isDateInFuture(_selectedDate.value)) return
         viewModelScope.launch {
             val activeEmps = allEmployees.value.filter { it.status == EmployeeStatuses.ACTIVE }
-            val currentMap = _attendanceStream.value.associateBy { it.employeeId }
-            val timeNow = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+            if (activeEmps.isEmpty()) return@launch
 
-            val list = activeEmps.map { emp ->
-                val att = currentMap[emp.id]
-                DailyAttendance(
-                    id = att?.id ?: 0,
-                    date = _selectedDate.value,
-                    employeeId = emp.id,
-                    employeeName = emp.name,
-                    employeeType = emp.type,
-                    isPresent = true,
-                    dayDepartment = att?.dayDepartment ?: emp.permanentDepartment,
-                    dayWorkRole = att?.dayWorkRole ?: emp.defaultWorkRole,
-                    dayContractorName = att?.dayContractorName ?: emp.contractorName,
-                    dayUnit = att?.dayUnit ?: emp.defaultUnit,
-                    dayShift = att?.dayShift ?: emp.defaultShift,
-                    attendanceTime = if (emp.type == EmployeeTypes.STAFF) (att?.attendanceTime?.ifBlank { timeNow }
-                        ?: timeNow) else "",
-                    dayRemarks = att?.dayRemarks ?: ""
-                )
+            val currentMap = _attendanceStream.value.associateBy { it.employeeId }
+            val isAlreadyAllPresent = activeEmps.all { currentMap[it.id]?.isPresent == true }
+
+            if (isAlreadyAllPresent) {
+                // Undo action: restore pre-Mark-All snapshot if available, or revert active back to absent
+                if (preMarkAllSnapshot != null) {
+                    repository.saveAttendanceBatch(preMarkAllSnapshot!!)
+                    preMarkAllSnapshot = null
+                } else {
+                    val reverted = activeEmps.map { emp ->
+                        val att = currentMap[emp.id]
+                        DailyAttendance(
+                            id = att?.id ?: 0,
+                            date = _selectedDate.value,
+                            employeeId = emp.id,
+                            employeeName = emp.name,
+                            employeeType = emp.type,
+                            isPresent = false,
+                            dayDepartment = att?.dayDepartment ?: emp.permanentDepartment,
+                            dayWorkRole = att?.dayWorkRole ?: emp.defaultWorkRole,
+                            dayContractorName = if (emp.type == EmployeeTypes.STAFF) "" else (att?.dayContractorName ?: emp.contractorName),
+                            dayUnit = att?.dayUnit ?: emp.defaultUnit,
+                            dayShift = att?.dayShift ?: emp.defaultShift,
+                            attendanceTime = "",
+                            attendanceTimestamp = 0L,
+                            dayRemarks = att?.dayRemarks ?: ""
+                        )
+                    }
+                    repository.saveAttendanceBatch(reverted)
+                }
+            } else {
+                // Save snapshot before performing bulk mark-all
+                preMarkAllSnapshot = _attendanceStream.value
+
+                val nowMillis = System.currentTimeMillis()
+                val timeFormat = if (_is24HourFormat.value) SimpleDateFormat("HH:mm", Locale.getDefault()) else SimpleDateFormat("hh:mm a", Locale.getDefault())
+                val timeNow = timeFormat.format(Date(nowMillis))
+
+                val list = activeEmps.map { emp ->
+                    val att = currentMap[emp.id]
+                    DailyAttendance(
+                        id = att?.id ?: 0,
+                        date = _selectedDate.value,
+                        employeeId = emp.id,
+                        employeeName = emp.name,
+                        employeeType = emp.type,
+                        isPresent = true,
+                        dayDepartment = att?.dayDepartment ?: emp.permanentDepartment,
+                        dayWorkRole = att?.dayWorkRole ?: emp.defaultWorkRole,
+                        dayContractorName = if (emp.type == EmployeeTypes.STAFF) "" else (att?.dayContractorName ?: emp.contractorName),
+                        dayUnit = att?.dayUnit ?: emp.defaultUnit,
+                        dayShift = att?.dayShift ?: emp.defaultShift,
+                        attendanceTime = if (emp.type == EmployeeTypes.STAFF) (att?.attendanceTime?.ifBlank { timeNow } ?: timeNow) else "",
+                        attendanceTimestamp = if (emp.type == EmployeeTypes.STAFF) (if ((att?.attendanceTimestamp ?: 0L) != 0L) att!!.attendanceTimestamp else nowMillis) else 0L,
+                        dayRemarks = att?.dayRemarks ?: ""
+                    )
+                }
+                repository.saveAttendanceBatch(list)
             }
-            repository.saveAttendanceBatch(list)
         }
     }
 
@@ -484,8 +613,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 dateAdded = todayStr,
                 permanentDepartment = if (targetType == EmployeeTypes.STAFF) defaultDept else "",
                 designation = if (targetType == EmployeeTypes.STAFF) defaultRole else "",
-                contractorId = contractorId,
-                contractorName = contractorName,
+                contractorId = if (targetType == EmployeeTypes.STAFF) null else contractorId,
+                contractorName = if (targetType == EmployeeTypes.STAFF) "" else contractorName,
                 defaultWorkRole = defaultRole,
                 defaultUnit = "Unit I",
                 defaultShift = "Shift A"
@@ -529,7 +658,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                         dateAdded = todayStr,
                         permanentDepartment = if (type == EmployeeTypes.STAFF) dept else "",
                         designation = if (type == EmployeeTypes.STAFF) role else "",
-                        contractorName = contractor,
+                        contractorName = if (type == EmployeeTypes.STAFF) "" else contractor,
                         defaultWorkRole = role,
                         defaultUnit = unit,
                         defaultShift = shift
@@ -544,6 +673,20 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             }
         }
         return employeesToAdd.size
+    }
+
+    fun clearStaffContractorAssociations(onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val count = repository.clearStaffContractorAssociations()
+            onComplete?.invoke(count)
+        }
+    }
+
+    fun migrateLegacyTimeRecords(onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val count = repository.migrateLegacyTimeRecords()
+            onComplete?.invoke(count)
+        }
     }
 
     // Full JSON Export
@@ -642,19 +785,17 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                     val list = mutableListOf<Employee>()
                     for (i in 0 until arr.length()) {
                         val obj = arr.getJSONObject(i)
+                        val empType = obj.optString("type", EmployeeTypes.LABOUR)
                         list.add(
                             Employee(
                                 name = obj.optString("name", "Unnamed"),
-                                type = obj.optString("type", EmployeeTypes.LABOUR),
+                                type = empType,
                                 status = obj.optString("status", EmployeeStatuses.ACTIVE),
                                 dateAdded = obj.optString("dateAdded", todayStr),
-                                permanentDepartment = obj.optString(
-                                    "permanentDepartment",
-                                    "Welding Shop"
-                                ),
-                                designation = obj.optString("designation", ""),
-                                contractorName = obj.optString("contractorName", ""),
-                                defaultWorkRole = obj.optString("defaultWorkRole", "Helper"),
+                                permanentDepartment = if (empType == EmployeeTypes.STAFF) obj.optString("permanentDepartment", "Welding Shop") else "",
+                                designation = if (empType == EmployeeTypes.STAFF) obj.optString("designation", "") else "",
+                                contractorName = if (empType == EmployeeTypes.STAFF) "" else obj.optString("contractorName", ""),
+                                defaultWorkRole = if (empType != EmployeeTypes.STAFF) obj.optString("defaultWorkRole", "Helper") else "",
                                 defaultUnit = obj.optString("defaultUnit", "Unit I"),
                                 defaultShift = obj.optString("defaultShift", "Shift A"),
                                 permanentRemarks = obj.optString("permanentRemarks", "")

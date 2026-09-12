@@ -54,6 +54,7 @@ data class DailyAttendance(
     val dayUnit: String = "",
     val dayShift: String = "",
     val attendanceTime: String = "", // For staff (e.g. "08:45 AM")
+    val attendanceTimestamp: Long = 0L, // Epoch timestamp in milliseconds
     val dayRemarks: String = "", // e.g. "Assigned to Laser today"
     val updatedAt: Long = System.currentTimeMillis()
 )

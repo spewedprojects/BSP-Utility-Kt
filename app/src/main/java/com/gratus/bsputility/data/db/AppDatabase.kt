@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.Contractor
@@ -27,7 +28,7 @@ import java.util.Locale
         Contractor::class,
         ConfigItem::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -38,6 +39,12 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE daily_attendance ADD COLUMN attendanceTimestamp INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -45,6 +52,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "bsp_manpower_database"
                 )
+                    .addMigrations(MIGRATION_1_2)
                     .addCallback(DatabaseCallback())
                     .build()
                 INSTANCE = instance
@@ -58,6 +66,45 @@ abstract class AppDatabase : RoomDatabase() {
                 INSTANCE?.let { database ->
                     CoroutineScope(Dispatchers.IO).launch {
                         populateInitialData(database.employeeDao())
+                    }
+                }
+            }
+
+            override fun onOpen(db: SupportSQLiteDatabase) {
+                super.onOpen(db)
+                INSTANCE?.let { database ->
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            // Clear any existing contractor associations for Staff (Issue #6 requirement)
+                            database.employeeDao().clearStaffContractorAssociations()
+                            database.employeeDao().clearStaffAttendanceContractors()
+
+                            // Auto-migrate legacy time strings to timestamps (Issue #10)
+                            val unmigrated = database.employeeDao().getUnmigratedTimeRecords()
+                            if (unmigrated.isNotEmpty()) {
+                                val formats = listOf(
+                                    SimpleDateFormat("yyyy-MM-dd hh:mm a", Locale.getDefault()),
+                                    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()),
+                                    SimpleDateFormat("yyyy-MM-dd h:mm a", Locale.getDefault())
+                                )
+                                val updated = unmigrated.mapNotNull { att ->
+                                    var timestamp = 0L
+                                    for (format in formats) {
+                                        try {
+                                            val d = format.parse("${att.date} ${att.attendanceTime.trim()}")
+                                            if (d != null) {
+                                                timestamp = d.time
+                                                break
+                                            }
+                                        } catch (_: Exception) {}
+                                    }
+                                    if (timestamp != 0L) att.copy(attendanceTimestamp = timestamp) else null
+                                }
+                                if (updated.isNotEmpty()) {
+                                    database.employeeDao().updateDailyAttendanceBatch(updated)
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
             }
