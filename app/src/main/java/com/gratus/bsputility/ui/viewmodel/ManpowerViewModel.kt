@@ -193,30 +193,15 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         val attendanceId: Long?
     )
 
-    val effectiveAttendanceItems: StateFlow<List<EmployeeAttendanceItem>> = combine(
+    // Unfiltered daily attendance items for the active roster on selectedDate (Issue #12)
+    val dailyAttendanceItems: StateFlow<List<EmployeeAttendanceItem>> = combine(
         allEmployees,
-        _attendanceStream,
-        attendanceSearchQuery,
-        attendanceFilterType,
-        attendanceFilterContractor,
-        attendanceFilterDepartment
-    ) { args: Array<Any?> ->
-        @Suppress("UNCHECKED_CAST")
-        val employees = args[0] as List<Employee>
-        @Suppress("UNCHECKED_CAST")
-        val attendances = args[1] as List<DailyAttendance>
-        val query = args[2] as String
-        val filterType = args[3] as String
-        val filterContractor = args[4] as? String
-        val filterDept = args[5] as? String
-
+        _attendanceStream
+    ) { employees, attendances ->
         val attendanceMap = attendances.associateBy { it.employeeId }
-
-        // Filter out "Out" status from active daily attendance (Out means left the company)
-        // Debarred employees REMAIN visible on subsequent days until status is changed
         val activeEmployees = employees.filter { it.status != EmployeeStatuses.OUT }
 
-        val items = activeEmployees.map { emp ->
+        activeEmployees.map { emp ->
             val att = attendanceMap[emp.id]
             EmployeeAttendanceItem(
                 employee = emp,
@@ -233,8 +218,16 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 attendanceId = att?.id
             )
         }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-        // Apply filters & search
+    // Filtered attendance items for AttendanceScreen UI
+    val effectiveAttendanceItems: StateFlow<List<EmployeeAttendanceItem>> = combine(
+        dailyAttendanceItems,
+        attendanceSearchQuery,
+        attendanceFilterType,
+        attendanceFilterContractor,
+        attendanceFilterDepartment
+    ) { items, query, filterType, filterContractor, filterDept ->
         items.filter { item ->
             val matchesQuery = query.isBlank() ||
                 item.employee.name.contains(query, ignoreCase = true) ||
@@ -611,7 +604,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 type = targetType,
                 status = EmployeeStatuses.ACTIVE,
                 dateAdded = todayStr,
-                permanentDepartment = if (targetType == EmployeeTypes.STAFF) defaultDept else "",
+                permanentDepartment = defaultDept,
                 designation = if (targetType == EmployeeTypes.STAFF) defaultRole else "",
                 contractorId = if (targetType == EmployeeTypes.STAFF) null else contractorId,
                 contractorName = if (targetType == EmployeeTypes.STAFF) "" else contractorName,
@@ -656,7 +649,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                         type = type,
                         status = status,
                         dateAdded = todayStr,
-                        permanentDepartment = if (type == EmployeeTypes.STAFF) dept else "",
+                        permanentDepartment = dept,
                         designation = if (type == EmployeeTypes.STAFF) role else "",
                         contractorName = if (type == EmployeeTypes.STAFF) "" else contractor,
                         defaultWorkRole = role,
@@ -673,6 +666,13 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             }
         }
         return employeesToAdd.size
+    }
+
+    fun syncLabourerDefaultsFromAttendance(onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val count = repository.syncLabourerDefaultsFromAttendance()
+            onComplete?.invoke(count)
+        }
     }
 
     fun clearStaffContractorAssociations(onComplete: ((Int) -> Unit)? = null) {
@@ -792,7 +792,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                                 type = empType,
                                 status = obj.optString("status", EmployeeStatuses.ACTIVE),
                                 dateAdded = obj.optString("dateAdded", todayStr),
-                                permanentDepartment = if (empType == EmployeeTypes.STAFF) obj.optString("permanentDepartment", "Welding Shop") else "",
+                                permanentDepartment = obj.optString("permanentDepartment", "Welding Shop"),
                                 designation = if (empType == EmployeeTypes.STAFF) obj.optString("designation", "") else "",
                                 contractorName = if (empType == EmployeeTypes.STAFF) "" else obj.optString("contractorName", ""),
                                 defaultWorkRole = if (empType != EmployeeTypes.STAFF) obj.optString("defaultWorkRole", "Helper") else "",
@@ -852,59 +852,97 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     // --- REPORT STRING BUILDERS ---
     fun generateMorningReportWhatsApp(): String {
         val date = _selectedDate.value
-        val summary = manpowerSummary.value
-        val verifications = _verificationStream.value.filter { it.isVerified }
+
+        val allEmps = allEmployees.value.filter { it.status != EmployeeStatuses.OUT }
+        val activeStaff = allEmps.filter { it.type == EmployeeTypes.STAFF }
+        val activeLabour = allEmps.filter { it.type != EmployeeTypes.STAFF }
+
+        val attendances = _attendanceStream.value
+        val attMap = attendances.associateBy { it.employeeId }
+
+        val staffPresentCount = activeStaff.count { attMap[it.id]?.isPresent == true }
+        val labourPresentCount = activeLabour.count { attMap[it.id]?.isPresent == true }
+        val totalOnFloor = staffPresentCount + labourPresentCount
+
+        val presentLabourers = activeLabour.filter { attMap[it.id]?.isPresent == true }
+
+        // Contractor breakdown
+        val contractorCounts = mutableMapOf<String, Int>()
+        presentLabourers.forEach { emp ->
+            val att = attMap[emp.id]
+            val contractor = att?.dayContractorName?.ifBlank { null }
+                ?: emp.contractorName.ifBlank { null }
+                ?: "Direct / In-house"
+            contractorCounts[contractor] = (contractorCounts[contractor] ?: 0) + 1
+        }
+
+        // Work assigned breakdown (labor present)
+        val roleCounts = mutableMapOf<String, Int>()
+        presentLabourers.forEach { emp ->
+            val att = attMap[emp.id]
+            val role = att?.dayWorkRole?.ifBlank { null }
+                ?: emp.defaultWorkRole.ifBlank { null }
+            if (!role.isNullOrBlank()) {
+                roleCounts[role] = (roleCounts[role] ?: 0) + 1
+            }
+        }
+
+        // Shift split (present)
+        var dayShiftCount = 0
+        var nightShiftCount = 0
+        val allPresentWorkers = allEmps.filter { attMap[it.id]?.isPresent == true }
+        allPresentWorkers.forEach { emp ->
+            val att = attMap[emp.id]
+            val shift = att?.dayShift?.ifBlank { null } ?: emp.defaultShift.ifBlank { "Shift A" }
+            val s = shift.lowercase()
+            if (s.contains("night") || s.contains("shift b") || s.contains("shift c") || s.contains("2nd") || s.contains("3rd")) {
+                nightShiftCount++
+            } else {
+                dayShiftCount++
+            }
+        }
+
+        // Absent staff
+        val absentStaffNames = activeStaff
+            .filter { attMap[it.id]?.isPresent != true }
+            .map { it.name }
+        val absentStaffStr = if (absentStaffNames.isEmpty()) "None" else absentStaffNames.joinToString(", ")
 
         val sb = StringBuilder()
-        sb.append("📋 *BSP METATECH LLP, CHAKAN*\n")
-        sb.append("🏭 *MORNING MANPOWER REPORT*\n")
-        sb.append("📅 *Date:* $date\n")
-        sb.append("⏰ *Report Time:* ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())} (Sub: < 11:00 AM)\n")
-        sb.append("━━━━━━━━━━━━━━━━━━━━\n")
-        sb.append("👥 *TOTAL MANPOWER: ${summary.grandTotalPresent}*\n")
-        sb.append("  • Staff Present: ${summary.totalStaffPresent}\n")
-        sb.append("  • Contract Labour: ${summary.totalLabourersPresent}\n")
-        if (summary.totalHousekeepingPresent > 0) {
-            sb.append("  • (Housekeeping Included: ${summary.totalHousekeepingPresent})\n")
-        }
-        sb.append("\n🏢 *CONTRACTOR-WISE BREAKDOWN:*\n")
-        if (summary.contractorCounts.isEmpty()) {
-            sb.append("  (No contract labourers marked present)\n")
+        sb.append("BSP Metatech LLP — Chakan\n")
+        sb.append("Attendance Report — $date\n\n")
+
+        sb.append("Staff present: $staffPresentCount / ${activeStaff.size}\n")
+        sb.append("Labor present: $labourPresentCount / ${activeLabour.size}\n")
+        sb.append("Total on floor: $totalOnFloor\n\n")
+
+        sb.append("--- By contractor ---\n")
+        if (contractorCounts.isEmpty()) {
+            sb.append("None present\n")
         } else {
-            summary.contractorCounts.forEach { (contractor, count) ->
-                sb.append("  • $contractor: *$count*\n")
+            contractorCounts.forEach { (c, count) ->
+                sb.append("$c: $count\n")
             }
         }
+        sb.append("\n")
 
-        sb.append("\n⚙️ *DEPARTMENT-WISE LABOUR ALLOCATION:*\n")
-        if (summary.departmentCounts.isEmpty()) {
-            sb.append("  (No allocation recorded)\n")
+        sb.append("--- By work assigned (labor present) ---\n")
+        if (roleCounts.isEmpty()) {
+            sb.append("None present\n")
         } else {
-            summary.departmentCounts.forEach { (dept, count) ->
-                sb.append("  • $dept: *$count*\n")
+            roleCounts.forEach { (r, count) ->
+                sb.append("$r: $count\n")
             }
         }
+        sb.append("\n")
 
-        sb.append("\n📍 *UNIT-WISE DISTRIBUTION:*\n")
-        summary.unitCounts.forEach { (unit, count) ->
-            sb.append("  • $unit: *$count*\n")
-        }
+        sb.append("--- Shift split (present) ---\n")
+        sb.append("Day: $dayShiftCount   Night: $nightShiftCount\n\n")
 
-        sb.append("\n🛠️ *ROLE / CATEGORY BREAKDOWN:*\n")
-        summary.roleCounts.forEach { (role, count) ->
-            sb.append("  • $role: *$count*\n")
-        }
+        sb.append("--- Absent ---\n")
+        sb.append("Staff: $absentStaffStr\n\n")
 
-        sb.append("\n✅ *DEPARTMENT VERIFICATION STATUS:*\n")
-        if (verifications.isEmpty()) {
-            sb.append("  ⚠️ Verification pending with department heads.\n")
-        } else {
-            verifications.forEach { v ->
-                sb.append("  • ${v.departmentName}: Verified by *${v.verifiedByStaffName}* (${v.verifiedAtTime})\n")
-            }
-        }
-
-        sb.append("━━━━━━━━━━━━━━━━━━━━\n")
+        sb.append("--------------\n")
         sb.append("Prepared by: HR Dept - BSP Metatech")
         return sb.toString()
     }
@@ -912,7 +950,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     fun generateDetailedCsv(): String {
         val sb = StringBuilder()
         sb.append("Date,Employee Name,Type,Status,Present,Department,Work/Role,Contractor,Unit,Shift,Time,Remarks\n")
-        effectiveAttendanceItems.value.forEach { item ->
+        dailyAttendanceItems.value.forEach { item ->
             sb.append("\"${_selectedDate.value}\",")
             sb.append("\"${item.employee.name}\",")
             sb.append("\"${item.employee.type}\",")

@@ -6,6 +6,7 @@ import com.gratus.bsputility.data.models.Contractor
 import com.gratus.bsputility.data.models.DailyAttendance
 import com.gratus.bsputility.data.models.DepartmentVerification
 import com.gratus.bsputility.data.models.Employee
+import com.gratus.bsputility.data.models.EmployeeTypes
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -137,5 +138,65 @@ class ManpowerRepository(private val dao: EmployeeDao) {
 
     suspend fun deleteConfigItem(item: ConfigItem) {
         dao.deleteConfigItem(item)
+    }
+
+    suspend fun syncLabourerDefaultsFromAttendance(): Int {
+        val attendances = dao.getLabourAttendanceWithDepartments()
+        if (attendances.isEmpty()) return 0
+
+        // Latest attendance record by employeeId (already sorted date DESC, id DESC)
+        val latestByEmployee = attendances.groupBy { it.employeeId }
+            .mapValues { (_, list) -> list.first() }
+
+        val allEmployees = dao.getAllEmployeesList()
+        val toUpdate = mutableListOf<Employee>()
+
+        for (emp in allEmployees) {
+            if (emp.type != EmployeeTypes.STAFF) {
+                val latest = latestByEmployee[emp.id]
+                if (latest != null) {
+                    var changed = false
+                    var newDept = emp.permanentDepartment
+                    var newRole = emp.defaultWorkRole
+                    var newUnit = emp.defaultUnit
+                    var newShift = emp.defaultShift
+
+                    if (emp.permanentDepartment.isBlank() || emp.permanentDepartment.equals("Unassigned", ignoreCase = true)) {
+                        if (latest.dayDepartment.isNotBlank() && !latest.dayDepartment.equals("Unassigned", ignoreCase = true)) {
+                            newDept = latest.dayDepartment
+                            changed = true
+                        }
+                    }
+                    if (emp.defaultWorkRole.isBlank() || emp.defaultWorkRole.equals("Helper", ignoreCase = true)) {
+                        if (latest.dayWorkRole.isNotBlank()) {
+                            newRole = latest.dayWorkRole
+                            changed = true
+                        }
+                    }
+                    if (emp.defaultUnit.isBlank() && latest.dayUnit.isNotBlank()) {
+                        newUnit = latest.dayUnit
+                        changed = true
+                    }
+                    if (emp.defaultShift.isBlank() && latest.dayShift.isNotBlank()) {
+                        newShift = latest.dayShift
+                        changed = true
+                    }
+
+                    if (changed) {
+                        toUpdate.add(emp.copy(
+                            permanentDepartment = newDept,
+                            defaultWorkRole = newRole,
+                            defaultUnit = newUnit,
+                            defaultShift = newShift
+                        ))
+                    }
+                }
+            }
+        }
+
+        if (toUpdate.isNotEmpty()) {
+            dao.updateEmployees(toUpdate)
+        }
+        return toUpdate.size
     }
 }

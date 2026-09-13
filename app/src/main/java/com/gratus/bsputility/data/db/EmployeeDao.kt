@@ -32,6 +32,12 @@ interface EmployeeDao {
     @Update
     suspend fun updateEmployee(employee: Employee)
 
+    @Update
+    suspend fun updateEmployees(employees: List<Employee>)
+
+    @Query("SELECT * FROM employees ORDER BY id ASC")
+    suspend fun getAllEmployeesList(): List<Employee>
+
     @Delete
     suspend fun deleteEmployee(employee: Employee)
 
@@ -62,6 +68,9 @@ interface EmployeeDao {
 
     @Query("SELECT * FROM daily_attendance WHERE attendanceTimestamp = 0 AND attendanceTime != ''")
     suspend fun getUnmigratedTimeRecords(): List<DailyAttendance>
+
+    @Query("SELECT * FROM daily_attendance WHERE employeeType != 'Staff' AND dayDepartment != '' AND dayDepartment != 'Unassigned' ORDER BY date DESC, id DESC")
+    suspend fun getLabourAttendanceWithDepartments(): List<DailyAttendance>
 
     // --- DEPARTMENT VERIFICATIONS ---
     @Query("SELECT * FROM department_verifications WHERE date = :date ORDER BY departmentName ASC")

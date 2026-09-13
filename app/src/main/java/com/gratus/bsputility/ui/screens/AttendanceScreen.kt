@@ -271,14 +271,14 @@ fun AttendanceScreenContent(
                         imageVector = Icons.Default.CheckCircle,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
-                        tint = if (areAllPresent) Color.White else MaterialTheme.colorScheme.primary
+                        tint = if (areAllPresent) Color.White else MaterialTheme.colorScheme.onPrimary
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = if (areAllPresent) "All Present (Undo)" else "Mark All",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (areAllPresent) Color.White else MaterialTheme.colorScheme.primary
+                        color = if (areAllPresent) Color.White else MaterialTheme.colorScheme.onPrimary
                     )
                 }
             }

@@ -78,7 +78,7 @@ fun VerificationScreen(
     viewModel: ManpowerViewModel,
     modifier: Modifier = Modifier
 ) {
-    val items by viewModel.effectiveAttendanceItems.collectAsStateWithLifecycle()
+    val items by viewModel.dailyAttendanceItems.collectAsStateWithLifecycle()
     val allEmployees by viewModel.allEmployees.collectAsStateWithLifecycle()
     val verifications by viewModel.verificationRecords.collectAsStateWithLifecycle()
     val configItems by viewModel.allConfigItems.collectAsStateWithLifecycle()

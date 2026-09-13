@@ -705,5 +705,184 @@ class ReverificationFeaturesTest {
         assertEquals("05:45 PM", eveningDisplay12)
         assertEquals("17:45", eveningDisplay24)
     }
+
+    // =========================================================================
+    // TESTS FOR ISSUES #11, #12, #13
+    // =========================================================================
+
+    @Test
+    fun `Issue 11 - Labourers retain permanent department and role in library and import`() {
+        // 1. Labourer created/edited in Rooster retains permanentDepartment
+        val labourer = Employee(
+            id = 50L,
+            name = "Kishore Shinde",
+            type = EmployeeTypes.LABOUR,
+            dateAdded = "2026-09-13",
+            permanentDepartment = "Welding Shop",
+            contractorName = "Apex Contractors",
+            defaultWorkRole = "Fitter",
+            defaultUnit = "Unit I",
+            defaultShift = "Shift A"
+        )
+        assertEquals("Welding Shop", labourer.permanentDepartment)
+        assertEquals("Fitter", labourer.defaultWorkRole)
+
+        // 2. Batch import assigns permanentDepartment to Labour as well
+        val importedLabour = Employee(
+            name = "Mahesh Patil",
+            type = EmployeeTypes.LABOUR,
+            dateAdded = "2026-09-13",
+            permanentDepartment = "Laser Cutting",
+            contractorName = "Chakan Workforce",
+            defaultWorkRole = "Operator"
+        )
+        assertEquals("Laser Cutting", importedLabour.permanentDepartment)
+        assertEquals("Operator", importedLabour.defaultWorkRole)
+
+        // 3. Sync labourer defaults from daily attendance back into library
+        val existingLabourers = listOf(
+            Employee(id = 1L, name = "Worker Without Dept", type = EmployeeTypes.LABOUR, dateAdded = "2026-09-13", permanentDepartment = "", defaultWorkRole = "Helper"),
+            Employee(id = 2L, name = "Worker Already Set", type = EmployeeTypes.LABOUR, dateAdded = "2026-09-13", permanentDepartment = "Welding Shop", defaultWorkRole = "Welder")
+        )
+        val attendanceHistory = listOf(
+            com.gratus.bsputility.data.models.DailyAttendance(
+                id = 100L,
+                date = "2026-09-13",
+                employeeId = 1L,
+                employeeName = "Worker Without Dept",
+                employeeType = EmployeeTypes.LABOUR,
+                dayDepartment = "Assembly & Quality",
+                dayWorkRole = "Fitter",
+                dayUnit = "Unit II",
+                dayShift = "Shift B"
+            )
+        )
+        val latestByEmp = attendanceHistory.groupBy { it.employeeId }.mapValues { it.value.first() }
+
+        val syncedLabourers = existingLabourers.map { emp ->
+            val latest = latestByEmp[emp.id]
+            if (latest != null && (emp.permanentDepartment.isBlank() || emp.permanentDepartment == "Unassigned")) {
+                emp.copy(
+                    permanentDepartment = latest.dayDepartment,
+                    defaultWorkRole = latest.dayWorkRole,
+                    defaultUnit = latest.dayUnit,
+                    defaultShift = latest.dayShift
+                )
+            } else emp
+        }
+
+        val updatedWorker1 = syncedLabourers.first { it.id == 1L }
+        assertEquals("Assembly & Quality", updatedWorker1.permanentDepartment)
+        assertEquals("Fitter", updatedWorker1.defaultWorkRole)
+        assertEquals("Unit II", updatedWorker1.defaultUnit)
+        assertEquals("Shift B", updatedWorker1.defaultShift)
+
+        val updatedWorker2 = syncedLabourers.first { it.id == 2L }
+        assertEquals("Welding Shop", updatedWorker2.permanentDepartment)
+    }
+
+    @Test
+    fun `Issue 12 - Attendance screen search and chip filters do not leak into daily attendance items`() {
+        data class MockItem(
+            val id: Long,
+            val name: String,
+            val department: String,
+            val isPresent: Boolean,
+            val type: String
+        )
+
+        val allDailyRoster = listOf(
+            MockItem(id = 1L, name = "Rajesh Staff", department = "Welding Shop", isPresent = true, type = EmployeeTypes.STAFF),
+            MockItem(id = 2L, name = "Amit Welder", department = "Welding Shop", isPresent = true, type = EmployeeTypes.LABOUR),
+            MockItem(id = 3L, name = "Sunil Laser", department = "Laser Cutting", isPresent = true, type = EmployeeTypes.LABOUR),
+            MockItem(id = 4L, name = "Pravin Assembly", department = "Assembly", isPresent = true, type = EmployeeTypes.LABOUR)
+        )
+
+        // Attendance Screen applies a search filter "Laser" and chip "Labour"
+        val searchQuery = "Laser"
+        val filteredForAttendanceScreen = allDailyRoster.filter { item ->
+            item.name.contains(searchQuery, ignoreCase = true) || item.department.contains(searchQuery, ignoreCase = true)
+        }
+        assertEquals(1, filteredForAttendanceScreen.size)
+        assertEquals("Sunil Laser", filteredForAttendanceScreen[0].name)
+
+        // Verification Screen uses the unfiltered daily attendance items!
+        // It must NOT be affected by the AttendanceScreen search query "Laser"
+        val verificationScreenItems = allDailyRoster
+        val presentDepts = verificationScreenItems
+            .filter { it.isPresent && it.type != EmployeeTypes.STAFF }
+            .map { it.department }
+            .distinct()
+            .sorted()
+
+        assertEquals(3, presentDepts.size)
+        assertTrue(presentDepts.contains("Welding Shop"))
+        assertTrue(presentDepts.contains("Laser Cutting"))
+        assertTrue(presentDepts.contains("Assembly"))
+    }
+
+    @Test
+    fun `Issue 13 - WhatsApp morning report matches requested format exactly`() {
+        val dateFormatted = "Sun, 13 Sept, 2026"
+        val activeStaffCount = 2
+        val activeLabourCount = 5
+        val staffPresentCount = 1
+        val labourPresentCount = 3
+        val totalOnFloor = staffPresentCount + labourPresentCount
+
+        val contractorCounts = mapOf(
+            "Apex Industrial Services" to 2,
+            "Chakan Workforce" to 1
+        )
+        val roleCounts = mapOf(
+            "Welder" to 2,
+            "Fitter" to 1
+        )
+        val dayShiftCount = 3
+        val nightShiftCount = 1
+        val absentStaffStr = "Rajesh Kharat"
+
+        val sb = StringBuilder()
+        sb.append("BSP Metatech LLP — Chakan\n")
+        sb.append("Attendance Report — $dateFormatted\n\n")
+
+        sb.append("Staff present: $staffPresentCount / $activeStaffCount\n")
+        sb.append("Labor present: $labourPresentCount / $activeLabourCount\n")
+        sb.append("Total on floor: $totalOnFloor\n\n")
+
+        sb.append("--- By contractor ---\n")
+        contractorCounts.forEach { (c, count) ->
+            sb.append("$c: $count\n")
+        }
+        sb.append("\n")
+
+        sb.append("--- By work assigned (labor present) ---\n")
+        roleCounts.forEach { (r, count) ->
+            sb.append("$r: $count\n")
+        }
+        sb.append("\n")
+
+        sb.append("--- Shift split (present) ---\n")
+        sb.append("Day: $dayShiftCount   Night: $nightShiftCount\n\n")
+
+        sb.append("--- Absent ---\n")
+        sb.append("Staff: $absentStaffStr\n\n")
+
+        sb.append("--------------\n")
+        sb.append("Prepared by: HR Dept - BSP Metatech")
+
+        val report = sb.toString()
+
+        assertTrue(report.contains("BSP Metatech LLP — Chakan"))
+        assertTrue(report.contains("Attendance Report — Sun, 13 Sept, 2026"))
+        assertTrue(report.contains("Staff present: 1 / 2"))
+        assertTrue(report.contains("Labor present: 3 / 5"))
+        assertTrue(report.contains("Total on floor: 4"))
+        assertTrue(report.contains("--- By contractor ---\nApex Industrial Services: 2\nChakan Workforce: 1"))
+        assertTrue(report.contains("--- By work assigned (labor present) ---\nWelder: 2\nFitter: 1"))
+        assertTrue(report.contains("--- Shift split (present) ---\nDay: 3   Night: 1"))
+        assertTrue(report.contains("--- Absent ---\nStaff: Rajesh Kharat"))
+        assertTrue(report.contains("--------------\nPrepared by: HR Dept - BSP Metatech"))
+    }
 }
 

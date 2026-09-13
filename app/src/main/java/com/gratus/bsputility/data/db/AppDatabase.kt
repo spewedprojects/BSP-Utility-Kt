@@ -104,6 +104,59 @@ abstract class AppDatabase : RoomDatabase() {
                                     database.employeeDao().updateDailyAttendanceBatch(updated)
                                 }
                             }
+
+                            // Auto-sync labourer permanent department/defaults from recent daily attendance
+                            val labourAttendances = database.employeeDao().getLabourAttendanceWithDepartments()
+                            if (labourAttendances.isNotEmpty()) {
+                                val latestByEmployee = labourAttendances.groupBy { it.employeeId }
+                                    .mapValues { (_, list) -> list.first() }
+                                val allEmployees = database.employeeDao().getAllEmployeesList()
+                                val toUpdate = mutableListOf<Employee>()
+                                for (emp in allEmployees) {
+                                    if (emp.type != EmployeeTypes.STAFF) {
+                                        val latest = latestByEmployee[emp.id]
+                                        if (latest != null) {
+                                            var changed = false
+                                            var newDept = emp.permanentDepartment
+                                            var newRole = emp.defaultWorkRole
+                                            var newUnit = emp.defaultUnit
+                                            var newShift = emp.defaultShift
+
+                                            if (emp.permanentDepartment.isBlank() || emp.permanentDepartment.equals("Unassigned", ignoreCase = true)) {
+                                                if (latest.dayDepartment.isNotBlank() && !latest.dayDepartment.equals("Unassigned", ignoreCase = true)) {
+                                                    newDept = latest.dayDepartment
+                                                    changed = true
+                                                }
+                                            }
+                                            if (emp.defaultWorkRole.isBlank() || emp.defaultWorkRole.equals("Helper", ignoreCase = true)) {
+                                                if (latest.dayWorkRole.isNotBlank()) {
+                                                    newRole = latest.dayWorkRole
+                                                    changed = true
+                                                }
+                                            }
+                                            if (emp.defaultUnit.isBlank() && latest.dayUnit.isNotBlank()) {
+                                                newUnit = latest.dayUnit
+                                                changed = true
+                                            }
+                                            if (emp.defaultShift.isBlank() && latest.dayShift.isNotBlank()) {
+                                                newShift = latest.dayShift
+                                                changed = true
+                                            }
+                                            if (changed) {
+                                                toUpdate.add(emp.copy(
+                                                    permanentDepartment = newDept,
+                                                    defaultWorkRole = newRole,
+                                                    defaultUnit = newUnit,
+                                                    defaultShift = newShift
+                                                ))
+                                            }
+                                        }
+                                    }
+                                }
+                                if (toUpdate.isNotEmpty()) {
+                                    database.employeeDao().updateEmployees(toUpdate)
+                                }
+                            }
                         } catch (_: Exception) {}
                     }
                 }

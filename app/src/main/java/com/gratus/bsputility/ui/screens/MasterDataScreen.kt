@@ -87,6 +87,11 @@ fun MasterDataScreen(
                 Toast.makeText(context, "Migrated $count time records to timestamps", Toast.LENGTH_LONG).show()
             }
         },
+        onSyncLabourDefaults = {
+            viewModel.syncLabourerDefaultsFromAttendance { count ->
+                Toast.makeText(context, "Transferred defaults for $count labourers into rooster library", Toast.LENGTH_LONG).show()
+            }
+        },
         onAddContractor = { viewModel.addContractor(it) },
         onUpdateContractor = { viewModel.updateContractor(it) },
         onDeleteContractor = {
@@ -111,6 +116,7 @@ fun MasterDataScreenContent(
     onToggle24Hour: (Boolean) -> Unit = {},
     onClearStaffContractors: () -> Unit = {},
     onMigrateTimeData: () -> Unit = {},
+    onSyncLabourDefaults: () -> Unit = {},
     onAddContractor: (Contractor) -> Unit,
     onUpdateContractor: (Contractor) -> Unit,
     onDeleteContractor: (Contractor) -> Unit,
@@ -362,6 +368,21 @@ fun MasterDataScreenContent(
                                 }
                                 Text(
                                     text = "Converts legacy string time records (e.g., '08:30 AM') into standard epoch timestamps.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 12.dp)
+                                )
+
+                                OutlinedButton(
+                                    onClick = onSyncLabourDefaults,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("btn_sync_labour_defaults")
+                                ) {
+                                    Text("Sync Labour Defaults from Attendance")
+                                }
+                                Text(
+                                    text = "Transfers allotted departments, roles, units, and shifts from daily attendance history back into labourer rooster records.",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(start = 4.dp, top = 2.dp)

@@ -576,7 +576,7 @@ fun RoosterScreenContent(
                     type = EmployeeTypes.LABOUR,
                     status = EmployeeStatuses.ACTIVE,
                     dateAdded = "",
-                    permanentDepartment = "",
+                    permanentDepartment = departments.firstOrNull() ?: "Welding Shop",
                     contractorId = contractors.firstOrNull()?.id,
                     contractorName = contractors.firstOrNull()?.name ?: "",
                     defaultWorkRole = roles.firstOrNull() ?: "Helper",
@@ -733,13 +733,24 @@ fun RoosterEmployeeCard(
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
-                    } else if (employee.defaultWorkRole.isNotBlank()) {
-                        Text(
-                            text = employee.defaultWorkRole,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    } else {
+                        if (employee.permanentDepartment.isNotBlank()) {
+                            Text(
+                                text = employee.permanentDepartment,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (employee.defaultWorkRole.isNotBlank()) {
+                            val roleText = if (employee.permanentDepartment.isNotBlank()) "• ${employee.defaultWorkRole}" else employee.defaultWorkRole
+                            Text(
+                                text = roleText,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
 
@@ -920,41 +931,42 @@ fun AddEditEmployeeDialog(
                     }
                 }
 
-                // If Staff: Permanent Department & Designation
-                if (type == EmployeeTypes.STAFF) {
-                    Column {
-                        Text("Permanent Department *", style = MaterialTheme.typography.labelMedium)
-                        Surface(
+                // Permanent Department (Applies to both Staff and Labour)
+                Column {
+                    Text("Permanent Department *", style = MaterialTheme.typography.labelMedium)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { deptExp = true },
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { deptExp = true },
-                            shape = RoundedCornerShape(4.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(department.ifBlank { "Select Department" }, fontSize = 13.sp)
-                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                            }
-                            DropdownMenu(expanded = deptExp, onDismissRequest = { deptExp = false }) {
-                                departments.forEach { d ->
-                                    DropdownMenuItem(
-                                        text = { Text(d) },
-                                        onClick = {
-                                            department = d
-                                            deptExp = false
-                                        }
-                                    )
-                                }
+                            Text(department.ifBlank { "Select Department" }, fontSize = 13.sp)
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                        }
+                        DropdownMenu(expanded = deptExp, onDismissRequest = { deptExp = false }) {
+                            departments.forEach { d ->
+                                DropdownMenuItem(
+                                    text = { Text(d) },
+                                    onClick = {
+                                        department = d
+                                        deptExp = false
+                                    }
+                                )
                             }
                         }
                     }
+                }
 
+                // If Staff: Designation
+                if (type == EmployeeTypes.STAFF) {
                     OutlinedTextField(
                         value = designation,
                         onValueChange = { designation = it },
@@ -1195,7 +1207,7 @@ fun AddEditEmployeeDialog(
                             name = name.trim(),
                             type = type,
                             status = status,
-                            permanentDepartment = if (type == EmployeeTypes.STAFF) (department.ifBlank { departments.firstOrNull() ?: "" }).trim() else "",
+                            permanentDepartment = (department.ifBlank { departments.firstOrNull() ?: "" }).trim(),
                             designation = if (type == EmployeeTypes.STAFF) designation.trim() else "",
                             contractorId = if (type == EmployeeTypes.STAFF) null else contractors.find { it.name.equals(contractorName, ignoreCase = true) }?.id,
                             contractorName = if (type == EmployeeTypes.STAFF) "" else contractorName,
@@ -1277,6 +1289,42 @@ fun PasteImportDialog(
                     }
                 }
 
+                // Permanent Department (Applies to both Staff and Labour)
+                var deptMenuExp by remember { mutableStateOf(false) }
+                Text("Select Permanent Department:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { deptMenuExp = true },
+                    shape = RoundedCornerShape(4.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(selectedDept.ifBlank { "Select Department" }, fontSize = 13.sp)
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = deptMenuExp,
+                        onDismissRequest = { deptMenuExp = false }
+                    ) {
+                        departments.forEach { d ->
+                            DropdownMenuItem(
+                                text = { Text(d) },
+                                onClick = {
+                                    selectedDept = d
+                                    deptMenuExp = false
+                                }
+                            )
+                        }
+                    }
+                }
+
                 if (targetType != EmployeeTypes.STAFF) {
                     var contractorMenuExp by remember { mutableStateOf(false) }
                     Text("Select Contractor:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
@@ -1307,6 +1355,41 @@ fun PasteImportDialog(
                                     onClick = {
                                         selectedContractor = c.name
                                         contractorMenuExp = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    var roleMenuExp by remember { mutableStateOf(false) }
+                    Text("Select Default Role:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { roleMenuExp = true },
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(selectedRole.ifBlank { "Select Role" }, fontSize = 13.sp)
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                        }
+                        DropdownMenu(
+                            expanded = roleMenuExp,
+                            onDismissRequest = { roleMenuExp = false }
+                        ) {
+                            roles.forEach { r ->
+                                DropdownMenuItem(
+                                    text = { Text(r) },
+                                    onClick = {
+                                        selectedRole = r
+                                        roleMenuExp = false
                                     }
                                 )
                             }
