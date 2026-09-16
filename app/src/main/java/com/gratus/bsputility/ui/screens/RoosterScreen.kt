@@ -4,7 +4,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.res.Configuration
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,10 +43,15 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Upload
+import com.gratus.bsputility.utils.StorageHelper
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -158,6 +166,8 @@ fun RoosterScreen(
         onExportJson = { viewModel.exportAllDataJson() },
         onExportCsv = { viewModel.generateRoosterCsv() },
         onImportJson = { viewModel.importAllDataJson(it) },
+        onImportCsv = { viewModel.importCsv(it) > 0 },
+        allConfigItems = configItems,
         modifier = modifier
     )
 }
@@ -173,6 +183,7 @@ fun RoosterScreenContent(
     units: List<String>,
     shifts: List<String> = emptyList(),
     customFields: List<ConfigItem> = emptyList(),
+    allConfigItems: List<ConfigItem> = emptyList(),
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     filterStatus: String,
@@ -197,6 +208,7 @@ fun RoosterScreenContent(
     onExportJson: () -> String,
     onExportCsv: () -> String,
     onImportJson: (String) -> Boolean,
+    onImportCsv: ((String) -> Boolean)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -607,6 +619,7 @@ fun RoosterScreenContent(
             units = units,
             shifts = shifts,
             customFields = customFields,
+            allConfigItems = allConfigItems,
             onDismiss = { showAddEditDialog = null },
             onSave = { updated ->
                 val sanitized = if (updated.type == EmployeeTypes.STAFF) {
@@ -630,6 +643,7 @@ fun RoosterScreenContent(
             contractors = contractors,
             departments = departments,
             roles = roles,
+            allConfigItems = allConfigItems,
             onDismiss = { showPasteImportDialog = false },
             onImport = { namesText, targetType, contractorId, contractorName, dept, role ->
                 val count = onImportPastedNames(namesText, targetType, contractorId, contractorName, dept, role)
@@ -645,6 +659,7 @@ fun RoosterScreenContent(
             onExportJson = onExportJson,
             onExportCsv = onExportCsv,
             onImportJson = onImportJson,
+            onImportCsv = onImportCsv,
             onDismiss = { showJsonExportImportDialog = false }
         )
     }
@@ -836,6 +851,7 @@ fun AddEditEmployeeDialog(
     units: List<String>,
     shifts: List<String> = emptyList(),
     customFields: List<ConfigItem> = emptyList(),
+    allConfigItems: List<ConfigItem> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (Employee) -> Unit
 ) {
@@ -859,6 +875,24 @@ fun AddEditEmployeeDialog(
 
     val availableShifts = remember(shifts) {
         if (shifts.isEmpty()) listOf("Shift A", "Shift B", "Shift C", "General") else shifts
+    }
+
+    val filteredRoles = remember(department, roles, allConfigItems) {
+        val labourRoleConfigs = allConfigItems.filter { it.category == "LABOUR_ROLE" }
+        if (labourRoleConfigs.isEmpty()) {
+            roles
+        } else {
+            val matching = labourRoleConfigs.filter { roleItem ->
+                val extra = roleItem.extraType.trim()
+                if (extra.isBlank() || extra.equals("ALL", ignoreCase = true)) {
+                    true
+                } else {
+                    val parts = extra.split(",").map { it.trim().lowercase() }
+                    parts.contains("all") || parts.contains(department.trim().lowercase())
+                }
+            }.map { it.name }
+            if (matching.isEmpty()) roles else matching
+        }
     }
 
     val initialCustomFields = remember(employee.customFieldsJson) {
@@ -1029,7 +1063,7 @@ fun AddEditEmployeeDialog(
                                 Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                             }
                             DropdownMenu(expanded = roleExp, onDismissRequest = { roleExp = false }) {
-                                roles.forEach { r ->
+                                filteredRoles.forEach { r ->
                                     DropdownMenuItem(
                                         text = { Text(r) },
                                         onClick = {
@@ -1238,6 +1272,7 @@ fun PasteImportDialog(
     contractors: List<Contractor>,
     departments: List<String>,
     roles: List<String>,
+    allConfigItems: List<ConfigItem> = emptyList(),
     onDismiss: () -> Unit,
     onImport: (
         namesText: String,
@@ -1252,7 +1287,26 @@ fun PasteImportDialog(
     var targetType by remember { mutableStateOf(EmployeeTypes.LABOUR) }
     var selectedContractor by remember { mutableStateOf(contractors.firstOrNull()?.name ?: "") }
     var selectedDept by remember { mutableStateOf(departments.firstOrNull() ?: "Welding Shop") }
-    var selectedRole by remember { mutableStateOf(roles.firstOrNull() ?: "Helper") }
+
+    val filteredRoles = remember(selectedDept, roles, allConfigItems) {
+        val labourRoleConfigs = allConfigItems.filter { it.category == "LABOUR_ROLE" }
+        if (labourRoleConfigs.isEmpty()) {
+            roles
+        } else {
+            val matching = labourRoleConfigs.filter { roleItem ->
+                val extra = roleItem.extraType.trim()
+                if (extra.isBlank() || extra.equals("ALL", ignoreCase = true)) {
+                    true
+                } else {
+                    val parts = extra.split(",").map { it.trim().lowercase() }
+                    parts.contains("all") || parts.contains(selectedDept.trim().lowercase())
+                }
+            }.map { it.name }
+            if (matching.isEmpty()) roles else matching
+        }
+    }
+
+    var selectedRole by remember(selectedDept) { mutableStateOf(filteredRoles.firstOrNull() ?: "Helper") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1384,7 +1438,7 @@ fun PasteImportDialog(
                             expanded = roleMenuExp,
                             onDismissRequest = { roleMenuExp = false }
                         ) {
-                            roles.forEach { r ->
+                            filteredRoles.forEach { r ->
                                 DropdownMenuItem(
                                     text = { Text(r) },
                                     onClick = {
@@ -1428,12 +1482,46 @@ fun JsonBackupDialog(
     onExportJson: () -> String,
     onExportCsv: () -> String,
     onImportJson: (String) -> Boolean,
+    onImportCsv: ((String) -> Boolean)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var jsonInput by remember { mutableStateOf("") }
     var exportTab by remember { mutableStateOf(true) }
     var generatedJson by remember { mutableStateOf("") }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val fileName = StorageHelper.getFileName(context, uri) ?: "file"
+            val text = StorageHelper.readTextFromUri(context, uri)
+            if (!text.isNullOrBlank()) {
+                val isCsv = fileName.endsWith(".csv", ignoreCase = true) || (!text.trimStart().startsWith("{") && !text.trimStart().startsWith("["))
+                if (isCsv && onImportCsv != null) {
+                    jsonInput = "[Loaded CSV from $fileName (${text.lines().size} lines)]"
+                    val success = onImportCsv(text)
+                    if (success) {
+                        Toast.makeText(context, "Replaced employee rooster from $fileName successfully!", Toast.LENGTH_LONG).show()
+                        onDismiss()
+                    } else {
+                        Toast.makeText(context, "Failed to parse CSV file", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    jsonInput = text
+                    val success = onImportJson(text)
+                    if (success) {
+                        Toast.makeText(context, "Replaced master data from $fileName successfully!", Toast.LENGTH_LONG).show()
+                        onDismiss()
+                    } else {
+                        Toast.makeText(context, "Invalid JSON in $fileName", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } else {
+                Toast.makeText(context, "Selected file is empty or could not be read", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1454,12 +1542,12 @@ fun JsonBackupDialog(
                     FilterChip(
                         selected = !exportTab,
                         onClick = { exportTab = false },
-                        label = { Text("Restore (JSON)") }
+                        label = { Text("Restore / Import") }
                     )
                 }
 
                 if (exportTab) {
-                    Text("Export all employee profiles, contractors, and master categories for backup or data transfer.", fontSize = 12.sp)
+                    Text("Export all employee profiles, contractors, and master categories to device storage and clipboard.", fontSize = 12.sp)
 
                     Button(
                         onClick = {
@@ -1467,7 +1555,11 @@ fun JsonBackupDialog(
                             generatedJson = json
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("BSP Manpower Data", json))
-                            Toast.makeText(context, "Copied JSON to clipboard!", Toast.LENGTH_SHORT).show()
+                            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                            val fileName = "BSP_MasterData_$timestamp.json"
+                            val res = StorageHelper.exportToDocuments(context, fileName, "application/json", json)
+                            val msg = if (res.success) "Saved to ${res.filePathOrUri} & copied to clipboard!" else "Copied to clipboard"
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -1481,7 +1573,11 @@ fun JsonBackupDialog(
                             val csv = onExportCsv()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("BSP Employee Roster CSV", csv))
-                            Toast.makeText(context, "Copied Employee CSV to clipboard!", Toast.LENGTH_SHORT).show()
+                            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                            val fileName = "BSP_Rooster_$timestamp.csv"
+                            val res = StorageHelper.exportToDocuments(context, fileName, "text/csv", csv)
+                            val msg = if (res.success) "Saved to ${res.filePathOrUri} & copied to clipboard!" else "Copied to clipboard"
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -1503,13 +1599,32 @@ fun JsonBackupDialog(
                         )
                     }
                 } else {
-                    Text("Paste full JSON backup string to restore data:", fontSize = 12.sp)
+                    Text("Select a backup file from storage or paste raw JSON below:", fontSize = 12.sp)
+
+                    OutlinedButton(
+                        onClick = {
+                            filePickerLauncher.launch(arrayOf("application/json", "text/csv", "text/comma-separated-values", "text/plain", "*/*"))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Choose File (.json / .csv)")
+                    }
+
+                    Text(
+                        text = "Note: Importing will replace existing data in the library.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Medium
+                    )
+
                     OutlinedTextField(
                         value = jsonInput,
                         onValueChange = { jsonInput = it },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(140.dp),
+                            .height(130.dp),
                         placeholder = { Text("{\n  \"employees\": [...]\n}") }
                     )
                     Button(
@@ -1517,7 +1632,7 @@ fun JsonBackupDialog(
                             if (jsonInput.isNotBlank()) {
                                 val success = onImportJson(jsonInput)
                                 if (success) {
-                                    Toast.makeText(context, "Master data restored successfully!", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Master data replaced successfully!", Toast.LENGTH_LONG).show()
                                     onDismiss()
                                 } else {
                                     Toast.makeText(context, "Invalid JSON format!", Toast.LENGTH_SHORT).show()
@@ -1528,7 +1643,7 @@ fun JsonBackupDialog(
                     ) {
                         Icon(Icons.Default.Upload, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Restore From JSON")
+                        Text("Restore / Replace From Text")
                     }
                 }
             }

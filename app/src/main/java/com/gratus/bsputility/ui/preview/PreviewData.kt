@@ -327,6 +327,15 @@ object PreviewData {
             "Welding Shop" to 1,
             "Plant" to 1
         ),
+        departmentStaffCounts = mapOf(
+            "Laser Cutting" to 1,
+            "Fabrication" to 1
+        ),
+        departmentLabourCounts = mapOf(
+            "Laser Cutting" to 1,
+            "Welding Shop" to 1,
+            "Plant" to 1
+        ),
         unitCounts = mapOf(
             "Unit I" to 4,
             "Unit II" to 1

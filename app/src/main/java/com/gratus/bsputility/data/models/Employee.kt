@@ -98,6 +98,8 @@ data class ManpowerSummary(
     val grandTotalPresent: Int = 0,
     val contractorCounts: Map<String, Int> = emptyMap(),
     val departmentCounts: Map<String, Int> = emptyMap(),
+    val departmentStaffCounts: Map<String, Int> = emptyMap(),
+    val departmentLabourCounts: Map<String, Int> = emptyMap(),
     val unitCounts: Map<String, Int> = emptyMap(),
     val roleCounts: Map<String, Int> = emptyMap(),
     val shiftCounts: Map<String, Int> = emptyMap(),

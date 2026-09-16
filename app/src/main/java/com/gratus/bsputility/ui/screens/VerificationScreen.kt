@@ -73,6 +73,12 @@ import com.gratus.bsputility.ui.theme.PresentGreenDarkText
 import com.gratus.bsputility.ui.theme.PresentGreenLight
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 
+import java.util.Locale
+import androidx.compose.material.icons.filled.Refresh
+import com.gratus.bsputility.ui.theme.IndustrialNavy900
+
+import androidx.compose.ui.text.style.TextOverflow
+
 @Composable
 fun VerificationScreen(
     viewModel: ManpowerViewModel,
@@ -82,6 +88,18 @@ fun VerificationScreen(
     val allEmployees by viewModel.allEmployees.collectAsStateWithLifecycle()
     val verifications by viewModel.verificationRecords.collectAsStateWithLifecycle()
     val configItems by viewModel.allConfigItems.collectAsStateWithLifecycle()
+    val yesterdayDeptCounts by viewModel.yesterdayDepartmentPresentCounts.collectAsStateWithLifecycle()
+    val twoDaysAgoDeptCounts by viewModel.twoDaysAgoDepartmentPresentCounts.collectAsStateWithLifecycle()
+    val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
+
+    val day1Label = remember(selectedDate) {
+        val d = viewModel.getDayOfWeekAbbreviation(selectedDate, 1)
+        if (d.isNotBlank()) "-1 ($d)" else "-1"
+    }
+    val day2Label = remember(selectedDate) {
+        val d = viewModel.getDayOfWeekAbbreviation(selectedDate, 2)
+        if (d.isNotBlank()) "-2 ($d)" else "-2"
+    }
 
     // Staff list for selecting verifier
     val staffList = remember(allEmployees) {
@@ -97,9 +115,12 @@ fun VerificationScreen(
         presentLabourers.groupBy { it.effectiveDepartment }
     }
 
-    // Only departments that have active/present workers on this date (Issue #4)
-    val allDepts = remember(deptMap) {
-        deptMap.keys.filter { it.isNotBlank() && it != "Unassigned" && (deptMap[it]?.isNotEmpty() == true) }.sorted()
+    // Departments that have active workers today OR active workers yesterday (-1d) OR day before yesterday (-2d)
+    val allDepts = remember(deptMap, yesterdayDeptCounts, twoDaysAgoDeptCounts) {
+        val todayDepts = deptMap.keys.filter { it.isNotBlank() && it != "Unassigned" && (deptMap[it]?.isNotEmpty() == true) }
+        val yesterdayDepts = yesterdayDeptCounts.keys.filter { it.isNotBlank() && it != "Unassigned" && (yesterdayDeptCounts[it] ?: 0) > 0 }
+        val twoDaysAgoDepts = twoDaysAgoDeptCounts.keys.filter { it.isNotBlank() && it != "Unassigned" && (twoDaysAgoDeptCounts[it] ?: 0) > 0 }
+        (todayDepts + yesterdayDepts + twoDaysAgoDepts).distinct().sorted()
     }
 
     val verifMap = remember(verifications) {
@@ -117,8 +138,15 @@ fun VerificationScreen(
         verifMap = verifMap,
         staffList = staffList,
         verifiedCount = verifiedCount,
+        yesterdayDeptCounts = yesterdayDeptCounts,
+        twoDaysAgoDeptCounts = twoDaysAgoDeptCounts,
+        day1Label = day1Label,
+        day2Label = day2Label,
         onVerify = { deptName, staffId, staffName, isVerified, remarks ->
             viewModel.verifyDepartment(deptName, staffId, staffName, isVerified, remarks)
+        },
+        onMarkSameAsDay = { deptName, dayOffset ->
+            viewModel.markDepartmentSameAsDay(deptName, dayOffset)
         },
         modifier = modifier
     )
@@ -131,7 +159,13 @@ fun VerificationScreenContent(
     verifMap: Map<String, DepartmentVerification>,
     staffList: List<Employee>,
     verifiedCount: Int,
+    yesterdayDeptCounts: Map<String, Int> = emptyMap(),
+    twoDaysAgoDeptCounts: Map<String, Int> = emptyMap(),
+    day1Label: String = "-1",
+    day2Label: String = "-2",
     onVerify: (deptName: String, staffId: Long?, staffName: String, isVerified: Boolean, remarks: String) -> Unit,
+    onMarkSameAsDay: (deptName: String, dayOffset: Int) -> Unit = { _, _ -> },
+    onMarkSameAsYesterday: (deptName: String) -> Unit = { onMarkSameAsDay(it, 1) },
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -242,14 +276,26 @@ fun VerificationScreenContent(
                 items(allDepts) { deptName ->
                     val labourInDept = deptMap[deptName] ?: emptyList()
                     val verif = verifMap[deptName]
+                    val yCount = yesterdayDeptCounts[deptName] ?: 0
+                    val y2Count = twoDaysAgoDeptCounts[deptName] ?: 0
 
                     DepartmentVerificationCard(
                         departmentName = deptName,
                         labourList = labourInDept,
                         verification = verif,
                         staffList = staffList,
+                        yesterdayCount = yCount,
+                        twoDaysAgoCount = y2Count,
+                        day1Label = day1Label,
+                        day2Label = day2Label,
                         onVerify = { staffId, staffName, isVerified, remarks ->
                             onVerify(deptName, staffId, staffName, isVerified, remarks)
+                        },
+                        onMarkSameAsDay = { offset ->
+                            onMarkSameAsDay(deptName, offset)
+                        },
+                        onMarkSameAsYesterday = {
+                            onMarkSameAsDay(deptName, 1)
                         }
                     )
                 }
@@ -268,7 +314,13 @@ fun DepartmentVerificationCard(
     labourList: List<ManpowerViewModel.EmployeeAttendanceItem>,
     verification: DepartmentVerification?,
     staffList: List<Employee>,
+    yesterdayCount: Int = 0,
+    twoDaysAgoCount: Int = 0,
+    day1Label: String = "-1",
+    day2Label: String = "-2",
     onVerify: (staffId: Long?, staffName: String, isVerified: Boolean, remarks: String) -> Unit,
+    onMarkSameAsDay: (dayOffset: Int) -> Unit = {},
+    onMarkSameAsYesterday: () -> Unit = { onMarkSameAsDay(1) },
     modifier: Modifier = Modifier
 ) {
     val isVerified = verification?.isVerified == true
@@ -317,7 +369,15 @@ fun DepartmentVerificationCard(
                             color = MaterialTheme.colorScheme.onSecondary
                         )
                         Text(
-                            text = "${labourList.size} Labourers Assigned Today",
+                            text = if (labourList.isNotEmpty()) {
+                                "${labourList.size} Labourers Assigned Today"
+                            } else if (yesterdayCount > 0) {
+                                "0 Assigned Today ($yesterdayCount present $day1Label)"
+                            } else if (twoDaysAgoCount > 0) {
+                                "0 Assigned Today ($twoDaysAgoCount present $day2Label)"
+                            } else {
+                                "0 Labourers Assigned"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -353,9 +413,92 @@ fun DepartmentVerificationCard(
                 }
             }
 
+            // Action: Mark Present Same as -1d or -2d
+            if (yesterdayCount > 0 || twoDaysAgoCount > 0) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "Copy attendance from previous days:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            val historySummary = buildString {
+                                if (yesterdayCount > 0) append("$day1Label: $yesterdayCount present")
+                                if (yesterdayCount > 0 && twoDaysAgoCount > 0) append(" • ")
+                                if (twoDaysAgoCount > 0) append("$day2Label: $twoDaysAgoCount present")
+                            }
+                            Text(
+                                text = historySummary.ifBlank { "No records in previous 2 days" },
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Button -1 (Yesterday)
+                            OutlinedButton(
+                                onClick = { onMarkSameAsDay(1) },
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(32.dp)
+                                    .testTag("btn_same_as_day1_$departmentName")
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(13.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Same as $day1Label" + if (yesterdayCount > 0) " ($yesterdayCount)" else "",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Button -2 (Day Before Yesterday)
+                            OutlinedButton(
+                                onClick = { onMarkSameAsDay(2) },
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(32.dp)
+                                    .testTag("btn_same_as_day2_$departmentName")
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(13.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Same as $day2Label" + if (twoDaysAgoCount > 0) " ($twoDaysAgoCount)" else "",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Expandable Labour List Preview
+            // Expandable Labour List Preview (Issue #20)
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -385,51 +528,7 @@ fun DepartmentVerificationCard(
             }
 
             AnimatedVisibility(visible = isExpanded) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (labourList.isEmpty()) {
-                        Text(
-                            text = "No contract labourers currently marked present for this department.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontStyle = FontStyle.Italic,
-                            modifier = Modifier.padding(4.dp)
-                        )
-                    } else {
-                        labourList.forEachIndexed { idx, l ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text(
-                                        text = "${idx + 1}. ${l.employee.name}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        text = "${l.effectiveWorkRole} • ${l.effectiveContractor}",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Text(
-                                    text = "${l.effectiveUnit} • ${l.effectiveShift}",
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.outline
-                                )
-                            }
-                        }
-                    }
-                }
+                LabourGroupedList(labourList = labourList)
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -530,6 +629,122 @@ fun DepartmentVerificationCard(
                             Text("Confirm & Sign Off", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LabourGroupedList(
+    labourList: List<ManpowerViewModel.EmployeeAttendanceItem>
+) {
+    if (labourList.isEmpty()) {
+        Text(
+            text = "No contract labourers currently marked present for this department.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontStyle = FontStyle.Italic,
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)
+        )
+        return
+    }
+
+    val isNight: (ManpowerViewModel.EmployeeAttendanceItem) -> Boolean = { item ->
+        val s = item.effectiveShift.lowercase(Locale.getDefault())
+        s.contains("night") || s.contains("shift c")
+    }
+
+    val dayWorkers = labourList.filter { !isNight(it) }
+    val nightWorkers = labourList.filter { isNight(it) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (dayWorkers.isNotEmpty()) {
+            if (nightWorkers.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = "DAY SHIFT (${dayWorkers.size})",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            LabourRoleSection(workers = dayWorkers)
+        }
+
+        if (nightWorkers.isNotEmpty()) {
+            Surface(
+                color = IndustrialNavy900.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(4.dp),
+                border = BorderStroke(1.dp, IndustrialNavy900.copy(alpha = 0.2f))
+            ) {
+                Text(
+                    text = "🌙 NIGHT SHIFT (${nightWorkers.size})",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+            LabourRoleSection(workers = nightWorkers)
+        }
+    }
+}
+
+@Composable
+fun LabourRoleSection(
+    workers: List<ManpowerViewModel.EmployeeAttendanceItem>
+) {
+    val roleGroups = workers.groupBy { it.effectiveWorkRole.ifBlank { "Helper" } }
+    val showRoleHeadings = roleGroups.keys.size > 1
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        roleGroups.forEach { (role, roleWorkers) ->
+            if (showRoleHeadings) {
+                Text(
+                    text = "• $role (${roleWorkers.size})",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                )
+            }
+            roleWorkers.forEachIndexed { idx, l ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${idx + 1}. ${l.employee.name}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "${l.effectiveWorkRole} • ${l.effectiveContractor}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = "${l.effectiveUnit} • ${l.effectiveShift}",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.outline
+                    )
                 }
             }
         }

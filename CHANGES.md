@@ -1,76 +1,51 @@
-# CHANGES v2.1.0: Implementation of Issues #11, #12, and #13
+# CHANGES v2.2.0: Implementation of Issues #14 – #20
 
-All three new issues and the labourer defaults transfer requirement have been implemented and verified.
+We have resolved all 7 requested features and issues from `misc/open_issues_BSP_Manpower_export_1789577349621.json`.
 
 ---
 
-## Changes Summary
+## Key Changes Summary
 
-### 1. Issue #11: Permanent Department & Role for Labourers & Defaults Transfer
-- **Files**:
-  - [EmployeeDao.kt](app/src/main/java/com/gratus/bsputility/data/db/EmployeeDao.kt)
-  - [ManpowerRepository.kt](app/src/main/java/com/gratus/bsputility/data/repository/ManpowerRepository.kt)
-  - [AppDatabase.kt](app/src/main/java/com/gratus/bsputility/data/db/AppDatabase.kt)
-  - [ManpowerViewModel.kt](app/src/main/java/com/gratus/bsputility/ui/viewmodel/ManpowerViewModel.kt)
-  - [RoosterScreen.kt](app/src/main/java/com/gratus/bsputility/ui/screens/RoosterScreen.kt)
-  - [MasterDataScreen.kt](app/src/main/java/com/gratus/bsputility/ui/screens/MasterDataScreen.kt)
-- **Problem**: Labourers' permanent departments were previously omitted from rooster records, and any departments, roles, units, and shifts previously allotted on the daily attendance screen needed to be preserved and transferred back into their library profiles.
-- **Solution**:
-  - **Rooster UI & Dialogs**:
-    - Made the "Permanent Department *" dropdown visible and selectable for all employees (both Staff and Labour) in `AddEditEmployeeDialog`.
-    - Allowed setting permanent department and default role in `PasteImportDialog` for batch imports.
-    - Updated rooster employee cards to display `"${employee.permanentDepartment} • ${employee.defaultWorkRole}"` for labourers.
-    - Set default permanent department in the FAB template when creating new employees.
-  - **Library Transfer / Backfill**:
-    - Added `syncLabourerDefaultsFromAttendance()` query and repository method which scans the most recent daily attendance records and backfills `permanentDepartment`, `defaultWorkRole`, `defaultUnit`, and `defaultShift` for any labourer missing them.
-    - Wired this auto-sync into `AppDatabase.onOpen` so existing user data is automatically restored.
-    - Added a **"Sync Labour Defaults from Attendance"** button in Master Settings -> Preferences for on-demand manual synchronization.
+### 1. Serial #14: Export/Import to Device Storage (`Documents/BSPManpower`) & Clean Replace
+- **Physical File Storage**: Added [`StorageHelper`](app/src/main/java/com/gratus/bsputility/utils/StorageHelper.kt) saving exports to the standard public `Documents/BSPManpower` directory (with fallbacks for legacy storage) while maintaining clipboard copying.
+- **System File Picker**: Integrated `ActivityResultContracts.OpenDocument()` in [`RoosterScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/RoosterScreen.kt) allowing users to select single `.json` or `.csv` files from their device storage.
+- **Replace Semantics**: As per user directive (*"Importing will not merge. only replace"*), added `replaceEmployees()` and `replaceAllMasterData()` in [`ManpowerRepository`](app/src/main/java/com/gratus/bsputility/data/repository/ManpowerRepository.kt) and [`EmployeeDao`](app/src/main/java/com/gratus/bsputility/data/db/EmployeeDao.kt), completely clearing existing tables before inserting imported records.
+- **Reports Screen Export**: Summary and Detailed CSV exports in [`ReportsScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/ReportsScreen.kt) now save timestamped `.csv` files directly to `Documents/BSPManpower/` as well as copying to the clipboard.
 
-### 2. Issue #12: Prevent Attendance Filters from Leaking into Verification Screen
-- **Files**:
-  - [ManpowerViewModel.kt](app/src/main/java/com/gratus/bsputility/ui/viewmodel/ManpowerViewModel.kt)
-  - [VerificationScreen.kt](app/src/main/java/com/gratus/bsputility/ui/screens/VerificationScreen.kt)
-- **Problem**: Applying a search text query or status/contractor chip filter in the Attendance Screen unintentionally reduced the attendance stream used by the Department Verification Screen and detailed CSV exports.
-- **Solution**:
-  - Created `dailyAttendanceItems: StateFlow<List<EmployeeAttendanceItem>>` combining `allEmployees` and `_attendanceStream` representing the complete, unfiltered daily attendance roster for that date.
-  - Re-routed `effectiveAttendanceItems: StateFlow<List<EmployeeAttendanceItem>>` to apply Attendance Screen's search query and chip filters on `dailyAttendanceItems`.
-  - Updated `VerificationScreen.kt` to observe `dailyAttendanceItems` rather than `effectiveAttendanceItems`.
-  - Updated `generateDetailedCsv()` in `ManpowerViewModel.kt` to export `dailyAttendanceItems.value` so exports remain complete regardless of UI search state.
+### 2. Serial #15: Conditional / Pre-linked Department Roles
+- **Config Storage**: Associated departments for `LABOUR_ROLE` config items are stored as comma-separated values (or `"ALL"`) in `ConfigItem.extraType`, preserving database schema compatibility.
+- **Master Data Customization**: Updated [`MasterDataScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/MasterDataScreen.kt) with an updated role creation/edit dialog featuring quick-filter chips and multi-select dropdowns to bind roles to specific departments. Role cards display `Applies to: [Departments]`.
+- **Dynamic Dialog Filtering**: In [`AttendanceLabourDialog`](app/src/main/java/com/gratus/bsputility/ui/components/AttendanceLabourDialog.kt), [`AttendanceScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/AttendanceScreen.kt), and [`RoosterScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/RoosterScreen.kt), role dropdowns dynamically filter to show only roles permitted for the selected department.
 
-### 3. Issue #13: WhatsApp Report Summary Layout Update
-- **File**:
-  - [ManpowerViewModel.kt](app/src/main/java/com/gratus/bsputility/ui/viewmodel/ManpowerViewModel.kt)
-- **Problem**: The WhatsApp report format was verbose and did not match the newly requested structured operational summary.
-- **Solution**:
-  - Updated `generateMorningReportWhatsApp()` to strictly match the requested template:
-    ```text
-    BSP Metatech LLP — Chakan
-    Attendance Report — Sun, 13 Sept, 2026
+### 3. Serial #16: Migration Tool Transferring Shift & Unit Details
+- **Root Cause**: `Employee.defaultUnit` and `defaultShift` default to `"Unit I"` and `"Shift A"`. The previous migration check (`emp.defaultUnit.isBlank()`) evaluated to `false`, skipping updates.
+- **Fix**: Updated [`ManpowerRepository.syncLabourerDefaultsFromAttendance`](app/src/main/java/com/gratus/bsputility/data/repository/ManpowerRepository.kt) and [`AppDatabase.kt`](app/src/main/java/com/gratus/bsputility/data/db/AppDatabase.kt) so that if `latest.dayUnit` and `latest.dayShift` are non-blank and differ from the worker's defaults, they update the worker's default unit and shift.
 
-    Staff present: a / b
-    Labor present: c / d
-    Total on floor: x
+### 4. Serial #17: "Same as Yesterday" with `-1` and `-2` Day Offsets
+- **Multi-Day Attendance Streams**: Added `twoDaysAgoDepartmentPresentCounts`, `getDayOfWeekAbbreviation(date, offsetDays)`, and `markDepartmentSameAsDay(departmentName, dayOffset)` in [`ManpowerViewModel`](app/src/main/java/com/gratus/bsputility/ui/viewmodel/ManpowerViewModel.kt) alongside the existing `yesterdayDepartmentPresentCounts`.
+- **Handling Weekly Offs (e.g. Thursdays or Sundays)**:
+  - When yesterday had 0 workers (e.g. on Friday morning after Thursday off, or Monday morning after Sunday off), the system looks back up to 2 days prior (e.g. Wednesday or Saturday).
+  - Departments with active workers today, yesterday (`-1d`), OR 2 days ago (`-2d`) are all displayed.
+  - The verification card shows a history summary and provides two distinct side-by-side action buttons:
+    - **`Same as -1 (Day)`** (e.g. `Same as -1 (Thu) (12)`)
+    - **`Same as -2 (Day)`** (e.g. `Same as -2 (Wed) (14)`)
+  - Tapping either copies the respective day's attendance roster for that specific department with a single click.
 
-    --- By contractor ---
-    [Contractor Name]: [Count]
-    (or None present)
+### 5. Serial #18: Tap-to-Show List on Reports Screen
+- **Interactive Metrics**: In [`ReportsScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/ReportsScreen.kt):
+  - Hero counters (*Total Manpower*, *Staff Present*, *Contract Labour*) are clickable to open a [`WorkersListDialog`](app/src/main/java/com/gratus/bsputility/ui/screens/ReportsScreen.kt).
+  - Breakdown items (*Contractor*, *Unit*, *Shift*, *Role*) are clickable to filter and display the matching workers.
+- **Worker Details**: Each item in the list modal displays worker name, type badge (Staff/Role), department, contractor, unit, and shift.
 
-    --- By work assigned (labor present) ---
-    [Role]: [Count]
-    (or None present)
+### 6. Serial #19: Two-Column Department-Wise Allocation
+- **Staff vs Labour Segregation**: In [`Employee.kt`](app/src/main/java/com/gratus/bsputility/data/models/Employee.kt), added `departmentStaffCounts` and `departmentLabourCounts` to `ManpowerSummary`.
+- **Table Card UI**: In [`ReportsScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/ReportsScreen.kt), replaced single-count breakdown with `DepartmentAllocationCard` presenting a clean table:
+  - Columns: **Department | Staff | Labour | Total**
+  - Tapping Staff or Labour count opens the worker modal for that specific category in that department.
 
-    --- Shift split (present) ---
-    Day: y   Night: z
-
-    --- Absent ---
-    Staff: [Absent Staff Names, or None]
-
-    --------------
-    Prepared by: HR Dept - BSP Metatech
-    ```
-  - Formats the date with `EEE, d MMM, yyyy` (e.g. `Sun, 13 Sept, 2026`).
-  - Correctly breaks down present labourers by contractor and assigned role (with `"None present"` fallbacks).
-  - Categorizes shift splits dynamically between Day and Night shifts.
-  - Lists absent active staff by name under `--- Absent ---` (`Staff: ...`), or `Staff: None` when all active staff are present.
+### 7. Serial #20: Role Headings and Night Shift Segregation
+- **Grouped Labourer List**: In both [`VerificationScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/VerificationScreen.kt) and the [`WorkersListDialog`](app/src/main/java/com/gratus/bsputility/ui/screens/ReportsScreen.kt):
+  - Workers are segregated into **Day Shift** vs **🌙 Night Shift**.
+  - If a group contains more than one role (e.g. Welder, Helper, Fitter), workers are grouped and displayed under distinct bold role subheadings with worker counts.
 
 ---

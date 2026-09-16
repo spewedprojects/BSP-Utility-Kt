@@ -64,6 +64,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.Contractor
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
@@ -127,6 +128,7 @@ fun AttendanceScreen(
         roles = roles,
         units = units,
         shifts = shifts,
+        allConfigItems = configItems,
         selectedDate = selectedDate,
         areAllPresent = areAllPresent,
         is24HourFormat = is24Hour,
@@ -169,6 +171,7 @@ fun AttendanceScreenContent(
     roles: List<String>,
     units: List<String>,
     shifts: List<String> = listOf("Shift A", "Shift B", "Shift C", "General"),
+    allConfigItems: List<ConfigItem> = emptyList(),
     selectedDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
     areAllPresent: Boolean = false,
     is24HourFormat: Boolean = false,
@@ -554,6 +557,7 @@ fun AttendanceScreenContent(
                 availableContractors = contractors,
                 availableUnits = units,
                 availableShifts = shifts,
+                allConfigItems = allConfigItems,
                 isFutureDate = isFutureDate,
                 onDismiss = { selectedItemForDialog = null },
                 onSave = { isPresent, dept, role, contractor, unit, shift, remarks ->

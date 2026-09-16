@@ -69,8 +69,20 @@ interface EmployeeDao {
     @Query("SELECT * FROM daily_attendance WHERE attendanceTimestamp = 0 AND attendanceTime != ''")
     suspend fun getUnmigratedTimeRecords(): List<DailyAttendance>
 
-    @Query("SELECT * FROM daily_attendance WHERE employeeType != 'Staff' AND dayDepartment != '' AND dayDepartment != 'Unassigned' ORDER BY date DESC, id DESC")
+    @Query("SELECT * FROM daily_attendance WHERE employeeType != 'Staff' AND (dayDepartment != '' OR dayWorkRole != '' OR dayUnit != '' OR dayShift != '') ORDER BY date DESC, id DESC")
     suspend fun getLabourAttendanceWithDepartments(): List<DailyAttendance>
+
+    @Query("SELECT * FROM daily_attendance WHERE date = :date")
+    suspend fun getAttendanceListForDate(date: String): List<DailyAttendance>
+
+    @Query("DELETE FROM employees")
+    suspend fun deleteAllEmployees()
+
+    @Query("DELETE FROM contractors")
+    suspend fun deleteAllContractors()
+
+    @Query("DELETE FROM config_items")
+    suspend fun deleteAllConfigItems()
 
     // --- DEPARTMENT VERIFICATIONS ---
     @Query("SELECT * FROM department_verifications WHERE date = :date ORDER BY departmentName ASC")

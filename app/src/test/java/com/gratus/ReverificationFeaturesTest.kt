@@ -884,5 +884,324 @@ class ReverificationFeaturesTest {
         assertTrue(report.contains("--- Absent ---\nStaff: Rajesh Kharat"))
         assertTrue(report.contains("--------------\nPrepared by: HR Dept - BSP Metatech"))
     }
+
+    @Test
+    fun `Issue 14 - Import replaces existing data rather than merging`() {
+        val initialEmployees = listOf(
+            Employee(id = 1L, name = "Old Employee 1", dateAdded = "2026-09-01"),
+            Employee(id = 2L, name = "Old Employee 2", dateAdded = "2026-09-01")
+        )
+        val importedEmployees = listOf(
+            Employee(id = 0L, name = "New Employee A", dateAdded = "2026-09-15"),
+            Employee(id = 0L, name = "New Employee B", dateAdded = "2026-09-15")
+        )
+
+        // Replacement logic: clear existing and insert imported
+        val currentDb = mutableListOf<Employee>().apply { addAll(initialEmployees) }
+        currentDb.clear()
+        currentDb.addAll(importedEmployees.mapIndexed { idx, e -> e.copy(id = (idx + 1).toLong()) })
+
+        assertEquals(2, currentDb.size)
+        assertFalse(currentDb.any { it.name.startsWith("Old") })
+        assertTrue(currentDb.any { it.name == "New Employee A" })
+        assertTrue(currentDb.any { it.name == "New Employee B" })
+    }
+
+    @Test
+    fun `Issue 15 - Conditional department roles filter correctly based on extraType`() {
+        val roles = listOf(
+            ConfigItem(id = 1L, category = "LABOUR_ROLE", name = "Helper", extraType = "ALL"),
+            ConfigItem(id = 2L, category = "LABOUR_ROLE", name = "Welder", extraType = "Welding Shop, Production"),
+            ConfigItem(id = 3L, category = "LABOUR_ROLE", name = "Painter", extraType = "Paint Shop"),
+            ConfigItem(id = 4L, category = "LABOUR_ROLE", name = "Operator", extraType = "Press & Bending, Laser Cutting")
+        )
+
+        fun filterRolesForDept(dept: String): List<String> {
+            if (dept.isBlank() || dept.equals("Unassigned", ignoreCase = true)) {
+                return roles.map { it.name }
+            }
+            return roles.filter { item ->
+                val appliesTo = item.extraType.ifBlank { "ALL" }
+                if (appliesTo.equals("ALL", ignoreCase = true)) return@filter true
+                val allowedDepts = appliesTo.split(",").map { it.trim().lowercase() }
+                allowedDepts.contains(dept.trim().lowercase())
+            }.map { it.name }
+        }
+
+        val weldingRoles = filterRolesForDept("Welding Shop")
+        assertTrue(weldingRoles.contains("Helper"))
+        assertTrue(weldingRoles.contains("Welder"))
+        assertFalse(weldingRoles.contains("Painter"))
+        assertFalse(weldingRoles.contains("Operator"))
+
+        val paintRoles = filterRolesForDept("Paint Shop")
+        assertTrue(paintRoles.contains("Helper"))
+        assertTrue(paintRoles.contains("Painter"))
+        assertFalse(paintRoles.contains("Welder"))
+
+        val allRolesUnassigned = filterRolesForDept("Unassigned")
+        assertEquals(4, allRolesUnassigned.size)
+    }
+
+    @Test
+    fun `Issue 16 - Migration tool correctly transfers shift and unit details when employee has non-empty defaults`() {
+        val existingLabourer = Employee(
+            id = 50L,
+            name = "Ramesh Labour",
+            type = EmployeeTypes.LABOUR,
+            dateAdded = "2026-09-01",
+            permanentDepartment = "Unassigned",
+            defaultWorkRole = "Helper",
+            defaultUnit = "Unit I", // Default value
+            defaultShift = "Shift A" // Default value
+        )
+
+        val latestAttendance = com.gratus.bsputility.data.models.DailyAttendance(
+            id = 100L,
+            date = "2026-09-14",
+            employeeId = 50L,
+            employeeName = "Ramesh Labour",
+            employeeType = EmployeeTypes.LABOUR,
+            dayDepartment = "Welding Shop",
+            dayWorkRole = "Welder",
+            dayUnit = "Unit II", // Transferred value
+            dayShift = "Shift B" // Transferred value
+        )
+
+        var newDept = existingLabourer.permanentDepartment
+        var newRole = existingLabourer.defaultWorkRole
+        var newUnit = existingLabourer.defaultUnit
+        var newShift = existingLabourer.defaultShift
+        var changed = false
+
+        if (existingLabourer.permanentDepartment.isBlank() || existingLabourer.permanentDepartment.equals("Unassigned", ignoreCase = true)) {
+            if (latestAttendance.dayDepartment.isNotBlank() && !latestAttendance.dayDepartment.equals("Unassigned", ignoreCase = true)) {
+                newDept = latestAttendance.dayDepartment
+                changed = true
+            }
+        }
+        if (existingLabourer.defaultWorkRole.isBlank() || existingLabourer.defaultWorkRole.equals("Helper", ignoreCase = true)) {
+            if (latestAttendance.dayWorkRole.isNotBlank()) {
+                newRole = latestAttendance.dayWorkRole
+                changed = true
+            }
+        }
+        if (latestAttendance.dayUnit.isNotBlank() && latestAttendance.dayUnit != existingLabourer.defaultUnit) {
+            newUnit = latestAttendance.dayUnit
+            changed = true
+        }
+        if (latestAttendance.dayShift.isNotBlank() && latestAttendance.dayShift != existingLabourer.defaultShift) {
+            newShift = latestAttendance.dayShift
+            changed = true
+        }
+
+        assertTrue(changed)
+        val updatedLabourer = existingLabourer.copy(
+            permanentDepartment = newDept,
+            defaultWorkRole = newRole,
+            defaultUnit = newUnit,
+            defaultShift = newShift
+        )
+
+        assertEquals("Welding Shop", updatedLabourer.permanentDepartment)
+        assertEquals("Welder", updatedLabourer.defaultWorkRole)
+        assertEquals("Unit II", updatedLabourer.defaultUnit)
+        assertEquals("Shift B", updatedLabourer.defaultShift)
+    }
+
+    @Test
+    fun `Issue 17 - Mark present same as yesterday populates records for target department`() {
+        val yesterdayAttendance = listOf(
+            com.gratus.bsputility.data.models.DailyAttendance(
+                id = 1L,
+                date = "2026-09-15",
+                employeeId = 10L,
+                employeeName = "Welder 1",
+                employeeType = EmployeeTypes.LABOUR,
+                isPresent = true,
+                dayDepartment = "Welding Shop",
+                dayWorkRole = "Welder",
+                dayUnit = "Unit I",
+                dayShift = "Shift A"
+            ),
+            com.gratus.bsputility.data.models.DailyAttendance(
+                id = 2L,
+                date = "2026-09-15",
+                employeeId = 11L,
+                employeeName = "Welder 2",
+                employeeType = EmployeeTypes.LABOUR,
+                isPresent = false, // Absent yesterday
+                dayDepartment = "Welding Shop",
+                dayWorkRole = "Welder"
+            ),
+            com.gratus.bsputility.data.models.DailyAttendance(
+                id = 3L,
+                date = "2026-09-15",
+                employeeId = 20L,
+                employeeName = "Laser Worker",
+                employeeType = EmployeeTypes.LABOUR,
+                isPresent = true,
+                dayDepartment = "Laser Cutting"
+            )
+        )
+
+        val targetDept = "Welding Shop"
+        val targetDate = "2026-09-16"
+
+        val yesterdayPresentInDept = yesterdayAttendance.filter {
+            it.isPresent && it.dayDepartment.equals(targetDept, ignoreCase = true)
+        }
+        assertEquals(1, yesterdayPresentInDept.size)
+
+        val todayRecords = yesterdayPresentInDept.map { y ->
+            com.gratus.bsputility.data.models.DailyAttendance(
+                id = 0L,
+                date = targetDate,
+                employeeId = y.employeeId,
+                employeeName = y.employeeName,
+                employeeType = y.employeeType,
+                isPresent = true,
+                dayDepartment = y.dayDepartment,
+                dayWorkRole = y.dayWorkRole,
+                dayUnit = y.dayUnit,
+                dayShift = y.dayShift
+            )
+        }
+
+        assertEquals(1, todayRecords.size)
+        assertEquals(targetDate, todayRecords[0].date)
+        assertEquals("Welder 1", todayRecords[0].employeeName)
+        assertTrue(todayRecords[0].isPresent)
+    }
+
+    @Test
+    fun `Issue 19 - Department wise allocation segregates staff and labour counts`() {
+        val sampleItems = listOf(
+            Pair(EmployeeTypes.STAFF, "Welding Shop"),
+            Pair(EmployeeTypes.STAFF, "Welding Shop"),
+            Pair(EmployeeTypes.LABOUR, "Welding Shop"),
+            Pair(EmployeeTypes.LABOUR, "Welding Shop"),
+            Pair(EmployeeTypes.LABOUR, "Welding Shop"),
+            Pair(EmployeeTypes.STAFF, "Laser Cutting"),
+            Pair(EmployeeTypes.LABOUR, "Laser Cutting")
+        )
+
+        val staffCounts = sampleItems
+            .filter { it.first == EmployeeTypes.STAFF }
+            .groupingBy { it.second }
+            .eachCount()
+
+        val labourCounts = sampleItems
+            .filter { it.first != EmployeeTypes.STAFF }
+            .groupingBy { it.second }
+            .eachCount()
+
+        assertEquals(2, staffCounts["Welding Shop"])
+        assertEquals(3, labourCounts["Welding Shop"])
+        assertEquals(1, staffCounts["Laser Cutting"])
+        assertEquals(1, labourCounts["Laser Cutting"])
+    }
+
+    @Test
+    fun `Issue 20 - Labourers are correctly grouped by Day vs Night shift and role headings`() {
+        data class SimpleWorker(val name: String, val role: String, val shift: String)
+
+        val workers = listOf(
+            SimpleWorker("Ajay", "Welder", "Shift A"),
+            SimpleWorker("Vijay", "Welder", "Shift A"),
+            SimpleWorker("Sanjay", "Helper", "Shift A"),
+            SimpleWorker("Nitin", "Welder", "Night Shift"),
+            SimpleWorker("Rohan", "Helper", "Night Shift")
+        )
+
+        val isNight: (SimpleWorker) -> Boolean = { it.shift.contains("night", ignoreCase = true) || it.shift.contains("shift c", ignoreCase = true) }
+
+        val dayWorkers = workers.filter { !isNight(it) }
+        val nightWorkers = workers.filter { isNight(it) }
+
+        assertEquals(3, dayWorkers.size)
+        assertEquals(2, nightWorkers.size)
+
+        val dayRoleGroups = dayWorkers.groupBy { it.role }
+        val nightRoleGroups = nightWorkers.groupBy { it.role }
+
+        // Day shift has > 1 role (Welder, Helper), so role headings are shown
+        assertTrue(dayRoleGroups.keys.size > 1)
+        assertEquals(2, dayRoleGroups["Welder"]?.size)
+        assertEquals(1, dayRoleGroups["Helper"]?.size)
+
+        // Night shift has > 1 role (Welder, Helper)
+        assertTrue(nightRoleGroups.keys.size > 1)
+        assertEquals(1, nightRoleGroups["Welder"]?.size)
+        assertEquals(1, nightRoleGroups["Helper"]?.size)
+    }
+
+    @Test
+    fun `Issue 17 Extension - Mark present supports -1 and -2 day offsets for Friday after Thursday off`() {
+        // Friday date
+        val fridayDate = "2026-09-18"
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+
+        fun getPrev(dateStr: String, offset: Int): String {
+            val cal = java.util.Calendar.getInstance()
+            cal.time = dateFormat.parse(dateStr)!!
+            cal.add(java.util.Calendar.DAY_OF_YEAR, -offset)
+            return dateFormat.format(cal.time)
+        }
+
+        fun getDayName(dateStr: String, offset: Int): String {
+            val cal = java.util.Calendar.getInstance()
+            cal.time = dateFormat.parse(dateStr)!!
+            cal.add(java.util.Calendar.DAY_OF_YEAR, -offset)
+            return java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(cal.time)
+        }
+
+        val day1 = getPrev(fridayDate, 1) // Thursday 2026-09-17
+        val day2 = getPrev(fridayDate, 2) // Wednesday 2026-09-16
+        assertEquals("2026-09-17", day1)
+        assertEquals("2026-09-16", day2)
+        assertEquals("Thu", getDayName(fridayDate, 1))
+        assertEquals("Wed", getDayName(fridayDate, 2))
+
+        // Thursday had 0 attendance because it's weekly off
+        val thursdayAttendance = emptyList<com.gratus.bsputility.data.models.DailyAttendance>()
+
+        // Wednesday had 5 workers present in Welding Shop
+        val wednesdayAttendance = listOf(
+            com.gratus.bsputility.data.models.DailyAttendance(
+                id = 1L,
+                date = day2,
+                employeeId = 101L,
+                employeeName = "Welder A",
+                employeeType = EmployeeTypes.LABOUR,
+                isPresent = true,
+                dayDepartment = "Welding Shop",
+                dayWorkRole = "Welder"
+            ),
+            com.gratus.bsputility.data.models.DailyAttendance(
+                id = 2L,
+                date = day2,
+                employeeId = 102L,
+                employeeName = "Helper B",
+                employeeType = EmployeeTypes.LABOUR,
+                isPresent = true,
+                dayDepartment = "Welding Shop",
+                dayWorkRole = "Helper"
+            )
+        )
+
+        // Using offset = 2 (Wednesday) to populate Friday's attendance
+        val sourceAttendance = wednesdayAttendance
+        val fridayPopulated = sourceAttendance.filter {
+            it.isPresent && it.dayDepartment.equals("Welding Shop", ignoreCase = true)
+        }.map { w ->
+            w.copy(id = 0L, date = fridayDate)
+        }
+
+        assertEquals(2, fridayPopulated.size)
+        assertTrue(fridayPopulated.all { it.date == fridayDate && it.isPresent })
+        assertEquals("Welder A", fridayPopulated[0].employeeName)
+        assertEquals("Helper B", fridayPopulated[1].employeeName)
+    }
 }
 

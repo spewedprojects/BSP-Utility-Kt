@@ -16,10 +16,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
@@ -27,6 +31,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -443,6 +450,13 @@ fun MasterDataScreenContent(
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                    } else if (item.category == "LABOUR_ROLE") {
+                                        val depts = item.extraType.ifBlank { "ALL" }
+                                        Text(
+                                            text = "Applies to: ${if (depts.equals("ALL", ignoreCase = true)) "All Departments" else depts}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     } else if (item.extraType.isNotBlank()) {
                                         Text(
                                             text = "Type: ${item.extraType}",
@@ -518,6 +532,7 @@ fun MasterDataScreenContent(
         AddConfigDialog(
             category = newConfigCategory,
             tabTitle = selectedTab,
+            availableDepartments = allConfigs.filter { it.category == "DEPARTMENT" }.map { it.name },
             onDismiss = { showAddConfigDialog = false },
             onSave = { name, fieldType ->
                 onAddConfigItem(newConfigCategory, name, fieldType)
@@ -597,12 +612,15 @@ fun AddContractorDialog(
 fun AddConfigDialog(
     category: String,
     tabTitle: String,
+    availableDepartments: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (name: String, fieldType: String) -> Unit
 ) {
     var itemName by remember { mutableStateOf("") }
     var fieldType by remember { mutableStateOf("TEXT") }
     var targetAudience by remember { mutableStateOf("ALL") } // ALL, STAFF, LABOUR
+    var selectedDepts by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var deptDropdownOpen by remember { mutableStateOf(false) }
 
     val dialogTitle = if (tabTitle == "Shifts") "Add Shift" else "Add to ${tabTitle.removeSuffix("s")}"
 
@@ -619,6 +637,80 @@ fun AddConfigDialog(
                     label = { Text(if (category == "SHIFT") "Shift Name (e.g. Shift A, General) *" else "Name / Title *") },
                     modifier = Modifier.fillMaxWidth().testTag("input_config_name")
                 )
+
+                if (category == "LABOUR_ROLE") {
+                    Text("Associated Department(s):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Select which department(s) can use this role (or leave as All).", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = if (selectedDepts.isEmpty()) "All Departments" else selectedDepts.joinToString(", "),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Applies to Department") },
+                            trailingIcon = {
+                                IconButton(onClick = { deptDropdownOpen = true }) {
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Departments")
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { deptDropdownOpen = true }
+                        )
+
+                        DropdownMenu(
+                            expanded = deptDropdownOpen,
+                            onDismissRequest = { deptDropdownOpen = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("All Departments (No restriction)") },
+                                onClick = {
+                                    selectedDepts = emptySet()
+                                    deptDropdownOpen = false
+                                }
+                            )
+                            availableDepartments.forEach { dept ->
+                                val isSelected = dept in selectedDepts
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(checked = isSelected, onCheckedChange = null)
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(dept)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedDepts = if (isSelected) selectedDepts - dept else selectedDepts + dept
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Quick selection chips
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedDepts.isEmpty(),
+                            onClick = { selectedDepts = emptySet() },
+                            label = { Text("All", fontSize = 10.sp) }
+                        )
+                        availableDepartments.forEach { dept ->
+                            val isSelected = dept in selectedDepts
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    selectedDepts = if (isSelected) selectedDepts - dept else selectedDepts + dept
+                                },
+                                label = { Text(dept, fontSize = 10.sp) }
+                            )
+                        }
+                    }
+                }
 
                 if (category == "CUSTOM_FIELD") {
                     Text("Field Type:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -650,7 +742,11 @@ fun AddConfigDialog(
         confirmButton = {
             Button(onClick = {
                 if (itemName.isNotBlank()) {
-                    val finalExtraType = if (category == "CUSTOM_FIELD") "$fieldType|$targetAudience" else fieldType
+                    val finalExtraType = when (category) {
+                        "CUSTOM_FIELD" -> "$fieldType|$targetAudience"
+                        "LABOUR_ROLE" -> if (selectedDepts.isEmpty()) "ALL" else selectedDepts.joinToString(", ")
+                        else -> fieldType
+                    }
                     onSave(itemName.trim(), finalExtraType)
                 }
             }) {

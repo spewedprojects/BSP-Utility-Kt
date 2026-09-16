@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -111,6 +112,26 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     private val _verificationStream = MutableStateFlow<List<DepartmentVerification>>(emptyList())
     val verificationRecords: StateFlow<List<DepartmentVerification>> = _verificationStream.asStateFlow()
 
+    // Stream of yesterday's (-1d) attendance for the currently selected date
+    private val _yesterdayAttendanceStream = MutableStateFlow<List<DailyAttendance>>(emptyList())
+    val yesterdayAttendanceRecords: StateFlow<List<DailyAttendance>> = _yesterdayAttendanceStream.asStateFlow()
+
+    val yesterdayDepartmentPresentCounts: StateFlow<Map<String, Int>> = _yesterdayAttendanceStream.map { attendances ->
+        attendances.filter { it.isPresent && it.employeeType != EmployeeTypes.STAFF }
+            .groupBy { it.dayDepartment.ifBlank { "Unassigned" } }
+            .mapValues { it.value.size }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    // Stream of day before yesterday's (-2d) attendance for the currently selected date
+    private val _twoDaysAgoAttendanceStream = MutableStateFlow<List<DailyAttendance>>(emptyList())
+    val twoDaysAgoAttendanceRecords: StateFlow<List<DailyAttendance>> = _twoDaysAgoAttendanceStream.asStateFlow()
+
+    val twoDaysAgoDepartmentPresentCounts: StateFlow<Map<String, Int>> = _twoDaysAgoAttendanceStream.map { attendances ->
+        attendances.filter { it.isPresent && it.employeeType != EmployeeTypes.STAFF }
+            .groupBy { it.dayDepartment.ifBlank { "Unassigned" } }
+            .mapValues { it.value.size }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     private var preMarkAllSnapshot: List<DailyAttendance>? = null
 
     init {
@@ -132,12 +153,75 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
+        viewModelScope.launch {
+            selectedDate.collectLatest { date ->
+                val prev = getPreviousDay(date, 1)
+                _yesterdayAttendanceStream.value = emptyList()
+                if (prev.isNotBlank()) {
+                    repository.getAttendanceForDate(prev).collect { list ->
+                        _yesterdayAttendanceStream.value = list
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            selectedDate.collectLatest { date ->
+                val prev2 = getPreviousDay(date, 2)
+                _twoDaysAgoAttendanceStream.value = emptyList()
+                if (prev2.isNotBlank()) {
+                    repository.getAttendanceForDate(prev2).collect { list ->
+                        _twoDaysAgoAttendanceStream.value = list
+                    }
+                }
+            }
+        }
     }
 
     // --- DATE NAVIGATION & FUTURE GUARDS ---
     fun isDateInFuture(dateString: String): Boolean {
         val todayStr = dateFormat.format(Date())
         return dateString > todayStr
+    }
+
+    fun getPreviousDay(dateString: String, offsetDays: Int = 1): String {
+        return try {
+            val cal = Calendar.getInstance()
+            cal.time = dateFormat.parse(dateString) ?: Date()
+            cal.add(Calendar.DAY_OF_YEAR, -offsetDays)
+            dateFormat.format(cal.time)
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    fun getDayOfWeekAbbreviation(dateString: String, offsetDays: Int = 0): String {
+        return try {
+            val cal = Calendar.getInstance()
+            cal.time = dateFormat.parse(dateString) ?: Date()
+            if (offsetDays != 0) {
+                cal.add(Calendar.DAY_OF_YEAR, -offsetDays)
+            }
+            SimpleDateFormat("EEE", Locale.getDefault()).format(cal.time)
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    fun markDepartmentSameAsDay(departmentName: String, dayOffset: Int = 1, onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val currentDate = selectedDate.value
+            val sourceDate = getPreviousDay(currentDate, dayOffset)
+            if (sourceDate.isNotBlank()) {
+                val count = repository.markDepartmentSameAsYesterday(currentDate, sourceDate, departmentName)
+                onComplete?.invoke(count)
+            } else {
+                onComplete?.invoke(0)
+            }
+        }
+    }
+
+    fun markDepartmentSameAsYesterday(departmentName: String, onComplete: ((Int) -> Unit)? = null) {
+        markDepartmentSameAsDay(departmentName, dayOffset = 1, onComplete = onComplete)
     }
 
     fun selectPreviousDay() {
@@ -270,6 +354,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
         val contractorMap = mutableMapOf<String, Int>()
         val deptMap = mutableMapOf<String, Int>()
+        val deptStaffMap = mutableMapOf<String, Int>()
+        val deptLabourMap = mutableMapOf<String, Int>()
         val unitMap = mutableMapOf<String, Int>()
         val roleMap = mutableMapOf<String, Int>()
         val shiftMap = mutableMapOf<String, Int>()
@@ -296,6 +382,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             // Department breakdown
             val dept = att.dayDepartment.ifBlank { "Unassigned" }
             deptMap[dept] = (deptMap[dept] ?: 0) + 1
+            if (type == EmployeeTypes.STAFF) {
+                deptStaffMap[dept] = (deptStaffMap[dept] ?: 0) + 1
+            } else {
+                deptLabourMap[dept] = (deptLabourMap[dept] ?: 0) + 1
+            }
 
             // Unit breakdown
             val unit = att.dayUnit.ifBlank { "Unit I" }
@@ -320,6 +411,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             grandTotalPresent = staffCount + labourCount,
             contractorCounts = contractorMap,
             departmentCounts = deptMap,
+            departmentStaffCounts = deptStaffMap,
+            departmentLabourCounts = deptLabourMap,
             unitCounts = unitMap,
             roleCounts = roleMap,
             shiftCounts = shiftMap,
@@ -662,7 +755,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
         if (employeesToAdd.isNotEmpty()) {
             viewModelScope.launch {
-                repository.insertEmployees(employeesToAdd)
+                // User requirement: "Importing will not merge. only replace."
+                repository.replaceEmployees(employeesToAdd)
             }
         }
         return employeesToAdd.size
@@ -744,6 +838,10 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         return try {
             val root = JSONObject(jsonStr)
             viewModelScope.launch {
+                var contractorsList: List<Contractor>? = null
+                var configItemsList: List<ConfigItem>? = null
+                var employeesList: List<Employee>? = null
+
                 // Import contractors
                 if (root.has("contractors")) {
                     val arr = root.getJSONArray("contractors")
@@ -759,16 +857,16 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                             )
                         )
                     }
-                    if (list.isNotEmpty()) repository.insertContractor(list[0]) // repository insert batch or iterate
-                    list.forEach { repository.insertContractor(it) }
+                    contractorsList = list
                 }
 
                 // Import config items
                 if (root.has("configItems")) {
                     val arr = root.getJSONArray("configItems")
+                    val list = mutableListOf<ConfigItem>()
                     for (i in 0 until arr.length()) {
                         val obj = arr.getJSONObject(i)
-                        repository.insertConfigItem(
+                        list.add(
                             ConfigItem(
                                 category = obj.optString("category", "DEPARTMENT"),
                                 name = obj.optString("name", ""),
@@ -776,6 +874,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                             )
                         )
                     }
+                    configItemsList = list
                 }
 
                 // Import employees
@@ -802,8 +901,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                             )
                         )
                     }
-                    if (list.isNotEmpty()) repository.insertEmployees(list)
+                    employeesList = list
                 }
+
+                // User requirement: "Importing will not merge. only replace."
+                repository.replaceAllMasterData(employeesList, contractorsList, configItemsList)
             }
             true
         } catch (_: Exception) {
@@ -936,6 +1038,16 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         }
         sb.append("\n")
 
+        sb.append("--- By department (labor present) ---\n")
+        if (roleCounts.isEmpty()) {
+            sb.append("None present\n")
+        } else {
+            roleCounts.forEach { (r, count) ->
+                sb.append("$r: $count\n")
+            }
+        }
+        sb.append("\n")
+
         sb.append("--- Shift split (present) ---\n")
         sb.append("Day: $dayShiftCount   Night: $nightShiftCount\n\n")
 
@@ -955,8 +1067,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             sb.append("\"${item.employee.name}\",")
             sb.append("\"${item.employee.type}\",")
             sb.append("\"${item.employee.status}\",")
-            sb.append(if (item.isPresent) "\"Present\"" else "\"Absent\"",)
-            sb.append(",\"${item.effectiveDepartment}\",")
+            sb.append(if (item.isPresent) "\"Present\"," else "\"Absent\",")
+            sb.append("\"${item.effectiveDepartment}\",")
             sb.append("\"${item.effectiveWorkRole}\",")
             sb.append("\"${item.effectiveContractor}\",")
             sb.append("\"${item.effectiveUnit}\",")
@@ -981,9 +1093,13 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             sb.append("\"$c\",$cnt\n")
         }
 
-        sb.append("\nDepartment,Count\n")
-        summary.departmentCounts.forEach { (d, cnt) ->
-            sb.append("\"$d\",$cnt\n")
+        sb.append("\nDepartment,Staff,Labour,Total\n")
+        val allDeptNames = (summary.departmentStaffCounts.keys + summary.departmentLabourCounts.keys).distinct().sorted()
+        allDeptNames.forEach { d ->
+            val staff = summary.departmentStaffCounts[d] ?: 0
+            val labour = summary.departmentLabourCounts[d] ?: 0
+            val total = staff + labour
+            sb.append("\"$d\",$staff,$labour,$total\n")
         }
 
         sb.append("\nUnit,Count\n")

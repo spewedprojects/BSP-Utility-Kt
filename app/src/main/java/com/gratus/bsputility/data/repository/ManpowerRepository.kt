@@ -140,6 +140,82 @@ class ManpowerRepository(private val dao: EmployeeDao) {
         dao.deleteConfigItem(item)
     }
 
+    suspend fun replaceEmployees(employees: List<Employee>) {
+        dao.deleteAllEmployees()
+        dao.insertEmployees(employees)
+    }
+
+    suspend fun replaceAllMasterData(
+        employees: List<Employee>?,
+        contractors: List<Contractor>?,
+        configItems: List<ConfigItem>?
+    ) {
+        if (contractors != null) {
+            dao.deleteAllContractors()
+            dao.insertContractors(contractors)
+        }
+        if (configItems != null) {
+            dao.deleteAllConfigItems()
+            dao.insertConfigItems(configItems)
+        }
+        if (employees != null) {
+            dao.deleteAllEmployees()
+            dao.insertEmployees(employees)
+        }
+    }
+
+    suspend fun getAttendanceListForDate(date: String): List<DailyAttendance> {
+        return dao.getAttendanceListForDate(date)
+    }
+
+    suspend fun markDepartmentSameAsYesterday(
+        targetDate: String,
+        yesterdayDate: String,
+        departmentName: String
+    ): Int {
+        val yesterdayRecords = dao.getAttendanceListForDate(yesterdayDate)
+        val matchingRecords = yesterdayRecords.filter {
+            it.isPresent && (departmentName.isBlank() || it.dayDepartment.equals(departmentName, ignoreCase = true))
+        }
+        if (matchingRecords.isEmpty()) return 0
+
+        val currentRecords = dao.getAttendanceListForDate(targetDate).associateBy { it.employeeId }
+        val now = System.currentTimeMillis()
+        val toSave = matchingRecords.map { y ->
+            val existing = currentRecords[y.employeeId]
+            if (existing != null) {
+                existing.copy(
+                    isPresent = true,
+                    dayDepartment = y.dayDepartment,
+                    dayWorkRole = y.dayWorkRole,
+                    dayContractorName = y.dayContractorName,
+                    dayUnit = y.dayUnit,
+                    dayShift = y.dayShift,
+                    updatedAt = now
+                )
+            } else {
+                DailyAttendance(
+                    date = targetDate,
+                    employeeId = y.employeeId,
+                    employeeName = y.employeeName,
+                    employeeType = y.employeeType,
+                    isPresent = true,
+                    dayDepartment = y.dayDepartment,
+                    dayWorkRole = y.dayWorkRole,
+                    dayContractorName = y.dayContractorName,
+                    dayUnit = y.dayUnit,
+                    dayShift = y.dayShift,
+                    attendanceTime = y.attendanceTime,
+                    attendanceTimestamp = y.attendanceTimestamp,
+                    updatedAt = now
+                )
+            }
+        }
+
+        dao.insertAttendanceBatch(toSave)
+        return toSave.size
+    }
+
     suspend fun syncLabourerDefaultsFromAttendance(): Int {
         val attendances = dao.getLabourAttendanceWithDepartments()
         if (attendances.isEmpty()) return 0
@@ -160,25 +236,26 @@ class ManpowerRepository(private val dao: EmployeeDao) {
                     var newRole = emp.defaultWorkRole
                     var newUnit = emp.defaultUnit
                     var newShift = emp.defaultShift
+                    var newContractor = emp.contractorName
 
-                    if (emp.permanentDepartment.isBlank() || emp.permanentDepartment.equals("Unassigned", ignoreCase = true)) {
-                        if (latest.dayDepartment.isNotBlank() && !latest.dayDepartment.equals("Unassigned", ignoreCase = true)) {
-                            newDept = latest.dayDepartment
-                            changed = true
-                        }
+                    if (latest.dayDepartment.isNotBlank() && !latest.dayDepartment.equals("Unassigned", ignoreCase = true) && latest.dayDepartment != emp.permanentDepartment) {
+                        newDept = latest.dayDepartment
+                        changed = true
                     }
-                    if (emp.defaultWorkRole.isBlank() || emp.defaultWorkRole.equals("Helper", ignoreCase = true)) {
-                        if (latest.dayWorkRole.isNotBlank()) {
-                            newRole = latest.dayWorkRole
-                            changed = true
-                        }
+                    if (latest.dayWorkRole.isNotBlank() && latest.dayWorkRole != emp.defaultWorkRole) {
+                        newRole = latest.dayWorkRole
+                        changed = true
                     }
-                    if (emp.defaultUnit.isBlank() && latest.dayUnit.isNotBlank()) {
+                    if (latest.dayUnit.isNotBlank() && latest.dayUnit != emp.defaultUnit) {
                         newUnit = latest.dayUnit
                         changed = true
                     }
-                    if (emp.defaultShift.isBlank() && latest.dayShift.isNotBlank()) {
+                    if (latest.dayShift.isNotBlank() && latest.dayShift != emp.defaultShift) {
                         newShift = latest.dayShift
+                        changed = true
+                    }
+                    if (latest.dayContractorName.isNotBlank() && latest.dayContractorName != emp.contractorName) {
+                        newContractor = latest.dayContractorName
                         changed = true
                     }
 
@@ -187,7 +264,8 @@ class ManpowerRepository(private val dao: EmployeeDao) {
                             permanentDepartment = newDept,
                             defaultWorkRole = newRole,
                             defaultUnit = newUnit,
-                            defaultShift = newShift
+                            defaultShift = newShift,
+                            contractorName = newContractor
                         ))
                     }
                 }

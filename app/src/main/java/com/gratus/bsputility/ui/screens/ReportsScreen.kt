@@ -62,6 +62,22 @@ import com.gratus.bsputility.ui.theme.IndustrialAmber500
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
 import com.gratus.bsputility.ui.theme.IndustrialNavy900
 import com.gratus.bsputility.ui.theme.MyApplicationTheme
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
+import com.gratus.bsputility.data.models.EmployeeTypes
+import com.gratus.bsputility.utils.StorageHelper
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.gratus.bsputility.ui.theme.PresentGreen
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 
@@ -74,11 +90,13 @@ fun ReportsScreen(
     val summary by viewModel.manpowerSummary.collectAsStateWithLifecycle()
     val date by viewModel.selectedDate.collectAsStateWithLifecycle()
     val verifications by viewModel.verificationRecords.collectAsStateWithLifecycle()
+    val attendanceItems by viewModel.dailyAttendanceItems.collectAsStateWithLifecycle()
 
     ReportsScreenContent(
         summary = summary,
         date = date,
         verifications = verifications,
+        attendanceItems = attendanceItems,
         onCopyWhatsAppReport = {
             val reportText = viewModel.generateMorningReportWhatsApp()
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -96,15 +114,29 @@ fun ReportsScreen(
         },
         onCopySummaryCsv = {
             val csv = viewModel.generateSummaryCsv()
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+            val fileName = "BSP_Manpower_Summary_${date}_$timeStamp.csv"
+            val saved = StorageHelper.exportToDocuments(context, fileName, "text/csv", csv)
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Summary CSV", csv))
-            Toast.makeText(context, "Summary CSV copied to clipboard", Toast.LENGTH_SHORT).show()
+            if (saved.success) {
+                Toast.makeText(context, "Saved to Documents/BSPManpower/$fileName & copied to clipboard", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "Summary CSV copied to clipboard", Toast.LENGTH_SHORT).show()
+            }
         },
         onCopyDetailedCsv = {
             val csv = viewModel.generateDetailedCsv()
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+            val fileName = "BSP_Attendance_Detailed_${date}_$timeStamp.csv"
+            val saved = StorageHelper.exportToDocuments(context, fileName, "text/csv", csv)
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Detailed Attendance CSV", csv))
-            Toast.makeText(context, "Detailed CSV copied to clipboard", Toast.LENGTH_SHORT).show()
+            if (saved.success) {
+                Toast.makeText(context, "Saved to Documents/BSPManpower/$fileName & copied to clipboard", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "Detailed CSV copied to clipboard", Toast.LENGTH_SHORT).show()
+            }
         },
         modifier = modifier
     )
@@ -115,12 +147,21 @@ fun ReportsScreenContent(
     summary: ManpowerSummary,
     date: String,
     verifications: List<DepartmentVerification>,
+    attendanceItems: List<ManpowerViewModel.EmployeeAttendanceItem> = emptyList(),
     onCopyWhatsAppReport: () -> Unit,
     onShareWhatsAppReport: () -> Unit,
     onCopySummaryCsv: () -> Unit,
     onCopyDetailedCsv: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var activeDialogCriteria by remember {
+        mutableStateOf<Pair<String, List<ManpowerViewModel.EmployeeAttendanceItem>>?>(null)
+    }
+
+    val presentWorkers = remember(attendanceItems) {
+        attendanceItems.filter { it.isPresent }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -174,14 +215,33 @@ fun ReportsScreenContent(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Big Counter Grid
+                // Big Counter Grid (Clickable to show individuals: Issue #18)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    MetricCounter(label = "Total Manpower", value = summary.grandTotalPresent.toString(), highlight = true)
-                    MetricCounter(label = "Staff Present", value = summary.totalStaffPresent.toString())
-                    MetricCounter(label = "Contract Labour", value = summary.totalLabourersPresent.toString())
+                    MetricCounter(
+                        label = "Total Manpower",
+                        value = summary.grandTotalPresent.toString(),
+                        highlight = true,
+                        onClick = {
+                            activeDialogCriteria = "Total Present Manpower" to presentWorkers
+                        }
+                    )
+                    MetricCounter(
+                        label = "Staff Present",
+                        value = summary.totalStaffPresent.toString(),
+                        onClick = {
+                            activeDialogCriteria = "Staff Present" to presentWorkers.filter { it.employee.type == EmployeeTypes.STAFF }
+                        }
+                    )
+                    MetricCounter(
+                        label = "Contract Labour",
+                        value = summary.totalLabourersPresent.toString(),
+                        onClick = {
+                            activeDialogCriteria = "Contract Labour Present" to presentWorkers.filter { it.employee.type != EmployeeTypes.STAFF }
+                        }
+                    )
                 }
             }
         }
@@ -255,15 +315,32 @@ fun ReportsScreenContent(
             title = "Contractor-wise Labour Count",
             icon = Icons.Default.Business,
             counts = summary.contractorCounts,
-            emptyMessage = "No contractor labourers marked present today"
+            emptyMessage = "No contractor labourers marked present today",
+            onItemClick = { contractor ->
+                activeDialogCriteria = "Contractor: $contractor" to presentWorkers.filter {
+                    it.effectiveContractor.equals(contractor, ignoreCase = true)
+                }
+            }
         )
 
-        // --- 4. DEPARTMENT-WISE BREAKDOWN ---
-        BreakdownCard(
-            title = "Department-wise Allocation",
-            icon = Icons.Default.Engineering,
-            counts = summary.departmentCounts,
-            emptyMessage = "No department allocation recorded today"
+        // --- 4. DEPARTMENT-WISE BREAKDOWN (Two-Column Layout: Issue #19) ---
+        DepartmentAllocationCard(
+            summary = summary,
+            onDeptStaffClick = { dept ->
+                activeDialogCriteria = "$dept — Staff" to presentWorkers.filter {
+                    it.effectiveDepartment.equals(dept, ignoreCase = true) && it.employee.type == EmployeeTypes.STAFF
+                }
+            },
+            onDeptLabourClick = { dept ->
+                activeDialogCriteria = "$dept — Contract Labour" to presentWorkers.filter {
+                    it.effectiveDepartment.equals(dept, ignoreCase = true) && it.employee.type != EmployeeTypes.STAFF
+                }
+            },
+            onDeptAllClick = { dept ->
+                activeDialogCriteria = "$dept — All Workers" to presentWorkers.filter {
+                    it.effectiveDepartment.equals(dept, ignoreCase = true)
+                }
+            }
         )
 
         // --- 5. UNIT & SHIFT BREAKDOWN ---
@@ -273,7 +350,12 @@ fun ReportsScreenContent(
                     title = "Unit-wise",
                     icon = Icons.Default.LocationOn,
                     counts = summary.unitCounts,
-                    emptyMessage = "No data"
+                    emptyMessage = "No data",
+                    onItemClick = { unit ->
+                        activeDialogCriteria = "Unit: $unit" to presentWorkers.filter {
+                            it.effectiveUnit.equals(unit, ignoreCase = true)
+                        }
+                    }
                 )
             }
             Box(modifier = Modifier.weight(1f)) {
@@ -281,7 +363,12 @@ fun ReportsScreenContent(
                     title = "Shift-wise",
                     icon = Icons.Default.Schedule,
                     counts = summary.shiftCounts,
-                    emptyMessage = "No data"
+                    emptyMessage = "No data",
+                    onItemClick = { shift ->
+                        activeDialogCriteria = "Shift: $shift" to presentWorkers.filter {
+                            it.effectiveShift.equals(shift, ignoreCase = true)
+                        }
+                    }
                 )
             }
         }
@@ -291,7 +378,12 @@ fun ReportsScreenContent(
             title = "Role / Category-wise Breakdown",
             icon = Icons.Default.Group,
             counts = summary.roleCounts,
-            emptyMessage = "No role breakdown available"
+            emptyMessage = "No role breakdown available",
+            onItemClick = { role ->
+                activeDialogCriteria = "Role: $role" to presentWorkers.filter {
+                    it.effectiveWorkRole.equals(role, ignoreCase = true)
+                }
+            }
         )
 
         // --- 7. VERIFICATION AUDIT TRAIL ---
@@ -343,11 +435,33 @@ fun ReportsScreenContent(
 
         Spacer(modifier = Modifier.height(60.dp))
     }
+
+    activeDialogCriteria?.let { (criteriaTitle, workersList) ->
+        WorkersListDialog(
+            title = criteriaTitle,
+            workers = workersList,
+            onDismiss = { activeDialogCriteria = null }
+        )
+    }
 }
 
 @Composable
-fun MetricCounter(label: String, value: String, highlight: Boolean = false) {
-    Column {
+fun MetricCounter(
+    label: String,
+    value: String,
+    highlight: Boolean = false,
+    onClick: (() -> Unit)? = null
+) {
+    Column(
+        modifier = if (onClick != null) {
+            Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { onClick() }
+                .padding(4.dp)
+        } else {
+            Modifier.padding(4.dp)
+        }
+    ) {
         Text(
             text = label,
             fontSize = 11.sp,
@@ -369,7 +483,8 @@ fun BreakdownCard(
     icon: ImageVector,
     counts: Map<String, Int>,
     emptyMessage: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onItemClick: ((String) -> Unit)? = null
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -398,7 +513,10 @@ fun BreakdownCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                            .then(
+                                if (onItemClick != null) Modifier.clip(RoundedCornerShape(4.dp)).clickable { onItemClick(key) } else Modifier
+                            )
+                            .padding(vertical = 4.dp, horizontal = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -406,7 +524,8 @@ fun BreakdownCard(
                             text = key,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
                         )
                         Surface(
                             shape = RoundedCornerShape(4.dp),
@@ -428,6 +547,393 @@ fun BreakdownCard(
     }
 }
 
+@Composable
+fun DepartmentAllocationCard(
+    summary: ManpowerSummary,
+    onDeptStaffClick: (String) -> Unit,
+    onDeptLabourClick: (String) -> Unit,
+    onDeptAllClick: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val allDepts = remember(summary) {
+        (summary.departmentCounts.keys + summary.departmentStaffCounts.keys + summary.departmentLabourCounts.keys)
+            .filter { it.isNotBlank() && it != "Unassigned" }
+            .distinct()
+            .sorted()
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(10.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Engineering, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Department-wise Allocation", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (allDepts.isEmpty()) {
+                Text(
+                    text = "No department allocation recorded today",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontStyle = FontStyle.Italic
+                )
+            } else {
+                // Table Header (Issue #19)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Department",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1.6f)
+                    )
+                    Text(
+                        text = "Staff",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(0.8f)
+                    )
+                    Text(
+                        text = "Labour",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.weight(0.8f)
+                    )
+                    Text(
+                        text = "Total",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.End,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(0.8f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                allDepts.forEach { dept ->
+                    val staffCount = summary.departmentStaffCounts[dept] ?: 0
+                    val labourCount = summary.departmentLabourCounts[dept] ?: 0
+                    val totalCount = summary.departmentCounts[dept] ?: (staffCount + labourCount)
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { onDeptAllClick(dept) }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = dept,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1.6f)
+                        )
+
+                        // Staff Column (clickable)
+                        Box(
+                            modifier = Modifier
+                                .weight(0.8f)
+                                .clickable { onDeptStaffClick(dept) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(3.dp),
+                                color = if (staffCount > 0) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent
+                            ) {
+                                Text(
+                                    text = staffCount.toString(),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (staffCount > 0) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (staffCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        // Labour Column (clickable)
+                        Box(
+                            modifier = Modifier
+                                .weight(0.8f)
+                                .clickable { onDeptLabourClick(dept) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(3.dp),
+                                color = if (labourCount > 0) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f) else Color.Transparent
+                            ) {
+                                Text(
+                                    text = labourCount.toString(),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (labourCount > 0) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (labourCount > 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        // Total Column
+                        Text(
+                            text = totalCount.toString(),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.End,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(0.8f)
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun WorkersListDialog(
+    title: String,
+    workers: List<ManpowerViewModel.EmployeeAttendanceItem>,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${workers.size} Present",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            if (workers.isEmpty()) {
+                Text(
+                    text = "No workers found for this criteria.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontStyle = FontStyle.Italic
+                )
+            } else {
+                val staffList = workers.filter { it.employee.type == EmployeeTypes.STAFF }
+                val labourList = workers.filter { it.employee.type != EmployeeTypes.STAFF }
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 440.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (staffList.isNotEmpty()) {
+                        if (labourList.isNotEmpty()) {
+                            item {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "STAFF (${staffList.size})",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                        items(staffList) { s ->
+                            WorkerDetailItem(item = s)
+                        }
+                    }
+
+                    if (labourList.isNotEmpty()) {
+                        if (staffList.isNotEmpty()) {
+                            item {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "CONTRACT LABOUR (${labourList.size})",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        val isNight: (ManpowerViewModel.EmployeeAttendanceItem) -> Boolean = {
+                            val sh = it.effectiveShift.lowercase(Locale.getDefault())
+                            sh.contains("night") || sh.contains("shift c")
+                        }
+                        val dayLabour = labourList.filter { !isNight(it) }
+                        val nightLabour = labourList.filter { isNight(it) }
+
+                        if (dayLabour.isNotEmpty()) {
+                            if (nightLabour.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Day Shift (${dayLabour.size})",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+                            }
+                            val roleGroups = dayLabour.groupBy { it.effectiveWorkRole.ifBlank { "Helper" } }
+                            val showRoles = roleGroups.keys.size > 1
+                            roleGroups.forEach { (role, rWorkers) ->
+                                if (showRoles) {
+                                    item {
+                                        Text(
+                                            text = "• $role (${rWorkers.size})",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                                        )
+                                    }
+                                }
+                                items(rWorkers) { w ->
+                                    WorkerDetailItem(item = w)
+                                }
+                            }
+                        }
+
+                        if (nightLabour.isNotEmpty()) {
+                            item {
+                                Text(
+                                    text = "🌙 Night Shift (${nightLabour.size})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 6.dp)
+                                )
+                            }
+                            val roleGroups = nightLabour.groupBy { it.effectiveWorkRole.ifBlank { "Helper" } }
+                            val showRoles = roleGroups.keys.size > 1
+                            roleGroups.forEach { (role, rWorkers) ->
+                                if (showRoles) {
+                                    item {
+                                        Text(
+                                            text = "• $role (${rWorkers.size})",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                                        )
+                                    }
+                                }
+                                items(rWorkers) { w ->
+                                    WorkerDetailItem(item = w)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+fun WorkerDetailItem(item: ManpowerViewModel.EmployeeAttendanceItem) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.employee.name,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(3.dp),
+                        color = if (item.employee.type == EmployeeTypes.STAFF) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = if (item.employee.type == EmployeeTypes.STAFF) "Staff" else item.effectiveWorkRole.ifBlank { "Labour" },
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (item.employee.type == EmployeeTypes.STAFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+                val subText = if (item.employee.type == EmployeeTypes.STAFF) {
+                    item.employee.designation.ifBlank { item.effectiveDepartment }
+                } else {
+                    "${item.effectiveDepartment} • ${item.effectiveContractor.ifBlank { "Direct" }}"
+                }
+                Text(
+                    text = subText,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = item.effectiveUnit.ifBlank { "Unit I" },
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+                Text(
+                    text = item.effectiveShift.ifBlank { "Shift A" },
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
 // ==========================================
 // PREVIEWS - ALL STATES
 // ==========================================
@@ -440,6 +946,7 @@ fun ReportsScreenPreview_Default() {
             summary = PreviewData.sampleSummary,
             date = "2026-09-10",
             verifications = PreviewData.sampleVerifications,
+            attendanceItems = PreviewData.sampleAttendanceItems,
             onCopyWhatsAppReport = {},
             onShareWhatsAppReport = {},
             onCopySummaryCsv = {},
@@ -456,6 +963,7 @@ fun ReportsScreenPreview_DarkTheme() {
             summary = PreviewData.sampleSummary,
             date = "2026-09-10",
             verifications = PreviewData.sampleVerifications,
+            attendanceItems = PreviewData.sampleAttendanceItems,
             onCopyWhatsAppReport = {},
             onShareWhatsAppReport = {},
             onCopySummaryCsv = {},

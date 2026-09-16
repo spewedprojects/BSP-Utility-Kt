@@ -58,6 +58,7 @@ fun AttendanceLabourDialog(
     availableContractors: List<Contractor>,
     availableUnits: List<String>,
     availableShifts: List<String> = emptyList(),
+    allConfigItems: List<com.gratus.bsputility.data.models.ConfigItem> = emptyList(),
     isFutureDate: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (
@@ -96,6 +97,24 @@ fun AttendanceLabourDialog(
 
     val shifts = remember(availableShifts) {
         if (availableShifts.isEmpty()) listOf("Shift A", "Shift B", "Shift C", "General") else availableShifts
+    }
+
+    val filteredRoles = remember(selectedDept, availableRoles, allConfigItems) {
+        val labourRoleConfigs = allConfigItems.filter { it.category == "LABOUR_ROLE" }
+        if (labourRoleConfigs.isEmpty()) {
+            availableRoles
+        } else {
+            val matching = labourRoleConfigs.filter { roleItem ->
+                val extra = roleItem.extraType.trim()
+                if (extra.isBlank() || extra.equals("ALL", ignoreCase = true)) {
+                    true
+                } else {
+                    val parts = extra.split(",").map { it.trim().lowercase() }
+                    parts.contains("all") || parts.contains(selectedDept.trim().lowercase())
+                }
+            }.map { it.name }
+            if (matching.isEmpty()) availableRoles else matching
+        }
     }
 
     val customFieldsMap = remember(employee.customFieldsJson) {
@@ -247,7 +266,7 @@ fun AttendanceLabourDialog(
                             expanded = roleExpanded,
                             onDismissRequest = { roleExpanded = false }
                         ) {
-                            availableRoles.forEach { role ->
+                            filteredRoles.forEach { role ->
                                 DropdownMenuItem(
                                     text = { Text(role) },
                                     onClick = {

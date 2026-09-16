@@ -134,11 +134,11 @@ abstract class AppDatabase : RoomDatabase() {
                                                     changed = true
                                                 }
                                             }
-                                            if (emp.defaultUnit.isBlank() && latest.dayUnit.isNotBlank()) {
+                                            if (latest.dayUnit.isNotBlank() && latest.dayUnit != emp.defaultUnit) {
                                                 newUnit = latest.dayUnit
                                                 changed = true
                                             }
-                                            if (emp.defaultShift.isBlank() && latest.dayShift.isNotBlank()) {
+                                            if (latest.dayShift.isNotBlank() && latest.dayShift != emp.defaultShift) {
                                                 newShift = latest.dayShift
                                                 changed = true
                                             }
@@ -193,14 +193,16 @@ abstract class AppDatabase : RoomDatabase() {
                 ).map { ConfigItem(category = "UNIT", name = it) }
 
                 val roles = listOf(
-                    "Helper",
-                    "Welder",
-                    "Operator",
-                    "Bender",
-                    "Painter",
-                    "Laser Operator",
-                    "Housekeeping"
-                ).map { ConfigItem(category = "LABOUR_ROLE", name = it) }
+                    ConfigItem(category = "LABOUR_ROLE", name = "Helper", extraType = "ALL"),
+                    ConfigItem(category = "LABOUR_ROLE", name = "Welder", extraType = "Welding Shop, Production"),
+                    ConfigItem(category = "LABOUR_ROLE", name = "Fitter", extraType = "Welding Shop, Assembly & Quality, Production"),
+                    ConfigItem(category = "LABOUR_ROLE", name = "Painter", extraType = "Paint Shop, Painting"),
+                    ConfigItem(category = "LABOUR_ROLE", name = "Blaster", extraType = "Paint Shop, Painting"),
+                    ConfigItem(category = "LABOUR_ROLE", name = "Operator", extraType = "Press & Bending, Laser Cutting, Maintenance"),
+                    ConfigItem(category = "LABOUR_ROLE", name = "Laser Operator", extraType = "Laser Cutting"),
+                    ConfigItem(category = "LABOUR_ROLE", name = "Bender", extraType = "Press & Bending"),
+                    ConfigItem(category = "LABOUR_ROLE", name = "Housekeeping", extraType = "ALL")
+                )
 
                 val shifts = listOf(
                     "Shift A",
@@ -336,7 +338,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.LABOUR,
                             status = EmployeeStatuses.ACTIVE,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Welding Shop",
                             contractorId = c1Id,
                             contractorName = "Apex Industrial Services",
                             defaultWorkRole = "Welder",
@@ -348,7 +350,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.LABOUR,
                             status = EmployeeStatuses.ACTIVE,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Welding Shop",
                             contractorId = c1Id,
                             contractorName = "Apex Industrial Services",
                             defaultWorkRole = "Helper",
@@ -360,7 +362,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.LABOUR,
                             status = EmployeeStatuses.ACTIVE,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Laser Cutting",
                             contractorId = c2Id,
                             contractorName = "Chakan Workforce Solutions",
                             defaultWorkRole = "Laser Operator",
@@ -372,7 +374,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.LABOUR,
                             status = EmployeeStatuses.ACTIVE,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Laser Cutting",
                             contractorId = c2Id,
                             contractorName = "Chakan Workforce Solutions",
                             defaultWorkRole = "Helper",
@@ -384,7 +386,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.LABOUR,
                             status = EmployeeStatuses.ACTIVE,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Press & Bending",
                             contractorId = c3Id,
                             contractorName = "Sai Engineering Labour",
                             defaultWorkRole = "Bender",
@@ -396,7 +398,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.LABOUR,
                             status = EmployeeStatuses.ACTIVE,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Press & Bending",
                             contractorId = c3Id,
                             contractorName = "Sai Engineering Labour",
                             defaultWorkRole = "Helper",
@@ -408,7 +410,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.LABOUR,
                             status = EmployeeStatuses.ACTIVE,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Paint Shop",
                             contractorId = c4Id,
                             contractorName = "Om Fabtech Services",
                             defaultWorkRole = "Painter",
@@ -420,7 +422,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.LABOUR,
                             status = EmployeeStatuses.ACTIVE,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Paint Shop",
                             contractorId = c4Id,
                             contractorName = "Om Fabtech Services",
                             defaultWorkRole = "Helper",
@@ -432,7 +434,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.HOUSEKEEPING,
                             status = EmployeeStatuses.ACTIVE,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Housekeeping",
                             contractorId = c4Id,
                             contractorName = "Om Fabtech Services",
                             defaultWorkRole = "Housekeeping",
@@ -444,7 +446,7 @@ abstract class AppDatabase : RoomDatabase() {
                             type = EmployeeTypes.LABOUR,
                             status = EmployeeStatuses.DEBARRED,
                             dateAdded = todayStr,
-                            permanentDepartment = "",
+                            permanentDepartment = "Welding Shop",
                             contractorId = c1Id,
                             contractorName = "Apex Industrial Services",
                             defaultWorkRole = "Helper",
