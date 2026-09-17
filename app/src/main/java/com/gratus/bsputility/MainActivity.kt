@@ -342,14 +342,14 @@ fun MainAppScreenPreview_Verification() {
     val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
     val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
     val verifMap = PreviewData.sampleVerifications.associateBy { it.departmentName }
-    val depts = listOf("Welding Shop", "Laser Cutting", "Fabrication", "Press Shop")
+    val depts = listOf("Fabrication", "Laser Cutting", "Press Shop", "Welding Shop")
     val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
 
     MyApplicationTheme {
         MainAppContent(
             selectedTab = NavigationTab.Verification,
             onTabSelected = {},
-            selectedDate = "2026-09-10",
+            selectedDate = "2026-09-17",
             onPreviousDay = {},
             onNextDay = {},
             onDateSelected = {}
@@ -360,7 +360,12 @@ fun MainAppScreenPreview_Verification() {
                 verifMap = verifMap,
                 staffList = staffList,
                 verifiedCount = 2,
-                onVerify = { _, _, _, _, _ -> }
+                yesterdayDeptCounts = mapOf("Welding Shop" to 3, "Fabrication" to 2, "Press Shop" to 4, "Laser Cutting" to 2),
+                twoDaysAgoDeptCounts = mapOf("Welding Shop" to 4, "Fabrication" to 2, "Press Shop" to 3, "Laser Cutting" to 1),
+                day1Label = "-1 (Wed)",
+                day2Label = "-2 (Tue)",
+                onVerify = { _, _, _, _, _ -> },
+                onMarkSameAsDay = { _, _ -> }
             )
         }
     }

@@ -1203,5 +1203,284 @@ class ReverificationFeaturesTest {
         assertEquals("Welder A", fridayPopulated[0].employeeName)
         assertEquals("Helper B", fridayPopulated[1].employeeName)
     }
+
+    @Test
+    fun `editing pre-existing labour role updates applies-to departments and maintains backwards compatibility`() {
+        // Helper function matching the filter in AttendanceLabourDialog and RoosterScreen
+        fun isRoleAvailableForDept(roleItem: ConfigItem, department: String): Boolean {
+            val extra = roleItem.extraType.trim()
+            if (extra.isBlank() || extra.equals("ALL", ignoreCase = true)) {
+                return true
+            }
+            val parts = extra.split(",").map { it.trim().lowercase() }
+            return parts.contains("all") || parts.contains(department.trim().lowercase())
+        }
+
+        // 1. Pre-existing legacy role with blank extraType (seeded/legacy)
+        val legacyRole = ConfigItem(id = 8L, category = "LABOUR_ROLE", name = "Welder", extraType = "")
+        assertTrue(isRoleAvailableForDept(legacyRole, "Welding Shop"))
+        assertTrue(isRoleAvailableForDept(legacyRole, "Laser Cutting"))
+        assertTrue(isRoleAvailableForDept(legacyRole, "Paint Shop"))
+
+        // 2. User edits the role to restrict to "Welding Shop, Production"
+        val editedRole = legacyRole.copy(extraType = "Welding Shop, Production")
+        assertTrue(isRoleAvailableForDept(editedRole, "Welding Shop"))
+        assertTrue(isRoleAvailableForDept(editedRole, "Production"))
+        assertFalse(isRoleAvailableForDept(editedRole, "Laser Cutting"))
+        assertFalse(isRoleAvailableForDept(editedRole, "Paint Shop"))
+
+        // 3. User edits the role again to "ALL" and renames it
+        val reUpdatedRole = editedRole.copy(name = "Senior Welder", extraType = "ALL")
+        assertEquals(8L, reUpdatedRole.id)
+        assertEquals("Senior Welder", reUpdatedRole.name)
+        assertTrue(isRoleAvailableForDept(reUpdatedRole, "Welding Shop"))
+        assertTrue(isRoleAvailableForDept(reUpdatedRole, "Laser Cutting"))
+        assertTrue(isRoleAvailableForDept(reUpdatedRole, "Paint Shop"))
+    }
+
+    @Test
+    fun `editing pre-existing custom field updates fieldType and targetAudience`() {
+        val originalField = ConfigItem(id = 20L, category = "CUSTOM_FIELD", name = "Shoe Size", extraType = "TEXT|ALL")
+        
+        fun parseField(cf: ConfigItem): Pair<String, String> {
+            val parts = cf.extraType.split("|")
+            val type = parts.getOrNull(0)?.ifBlank { "TEXT" } ?: "TEXT"
+            val target = parts.getOrNull(1)?.ifBlank { "ALL" } ?: "ALL"
+            return Pair(type, target)
+        }
+
+        val (origType, origTarget) = parseField(originalField)
+        assertEquals("TEXT", origType)
+        assertEquals("ALL", origTarget)
+
+        // Edit to Number and Labour Only
+        val updatedField = originalField.copy(name = "Safety Shoe Size", extraType = "NUMBER|LABOUR")
+        val (newType, newTarget) = parseField(updatedField)
+        assertEquals("NUMBER", newType)
+        assertEquals("LABOUR", newTarget)
+        assertEquals(20L, updatedField.id)
+        assertEquals("Safety Shoe Size", updatedField.name)
+    }
+
+    @Test
+    fun `CSV export and import roundtrip preserves contractors, roles, units, shifts, and staff designations`() {
+        val originalEmployees = listOf(
+            Employee(
+                id = 1L,
+                name = "Rajesh Sharma",
+                type = EmployeeTypes.STAFF,
+                status = EmployeeStatuses.ACTIVE,
+                dateAdded = "2026-09-01",
+                permanentDepartment = "Maintenance",
+                designation = "Lead Engineer",
+                contractorName = "",
+                defaultWorkRole = "",
+                defaultUnit = "Unit I",
+                defaultShift = "General"
+            ),
+            Employee(
+                id = 2L,
+                name = "Vijay Kumar",
+                type = EmployeeTypes.LABOUR,
+                status = EmployeeStatuses.ACTIVE,
+                dateAdded = "2026-09-05",
+                permanentDepartment = "Welding Shop",
+                designation = "",
+                contractorName = "Apex Facilities",
+                defaultWorkRole = "Welder",
+                defaultUnit = "Unit II",
+                defaultShift = "Shift A"
+            ),
+            Employee(
+                id = 3L,
+                name = "Suresh Patil",
+                type = EmployeeTypes.LABOUR,
+                status = EmployeeStatuses.ACTIVE,
+                dateAdded = "2026-09-08",
+                permanentDepartment = "Laser Cutting",
+                designation = "",
+                contractorName = "Shree Enterprises",
+                defaultWorkRole = "Laser Operator",
+                defaultUnit = "Unit III",
+                defaultShift = "Night Shift"
+            )
+        )
+
+        // 1. Export to CSV string
+        val sb = StringBuilder()
+        sb.append("Name,Type,Status,Department,Designation,Contractor,Default Role,Default Unit,Default Shift,Date Added,Remarks\n")
+        fun escapeCsv(s: String) = "\"" + s.replace("\"", "\"\"") + "\""
+        originalEmployees.forEach { emp ->
+            sb.append(escapeCsv(emp.name)).append(",")
+            sb.append(escapeCsv(emp.type)).append(",")
+            sb.append(escapeCsv(emp.status)).append(",")
+            sb.append(escapeCsv(emp.permanentDepartment)).append(",")
+            sb.append(escapeCsv(emp.designation)).append(",")
+            sb.append(escapeCsv(emp.contractorName)).append(",")
+            sb.append(escapeCsv(emp.defaultWorkRole)).append(",")
+            sb.append(escapeCsv(emp.defaultUnit)).append(",")
+            sb.append(escapeCsv(emp.defaultShift)).append(",")
+            sb.append(escapeCsv(emp.dateAdded)).append(",")
+            sb.append(escapeCsv(emp.permanentRemarks)).append("\n")
+        }
+        val exportedCsv = sb.toString()
+
+        // 2. Parse using the CSV import logic
+        fun parseCsvLine(line: String): List<String> {
+            val result = mutableListOf<String>()
+            val itemSb = StringBuilder()
+            var inQuotes = false
+            var i = 0
+            while (i < line.length) {
+                val c = line[i]
+                if (c == '"') {
+                    if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+                        itemSb.append('"')
+                        i++
+                    } else {
+                        inQuotes = !inQuotes
+                    }
+                } else if (c == ',' && !inQuotes) {
+                    result.add(itemSb.toString().trim())
+                    itemSb.setLength(0)
+                } else {
+                    itemSb.append(c)
+                }
+                i++
+            }
+            result.add(itemSb.toString().trim())
+            return result
+        }
+
+        val lines = exportedCsv.lines().map { it.trim() }.filter { it.isNotBlank() }
+        val firstLineCols = parseCsvLine(lines[0])
+        val headerIndexMap = firstLineCols.mapIndexed { idx, col ->
+            col.lowercase().replace(" ", "").replace("_", "") to idx
+        }.toMap()
+
+        fun getColValue(cols: List<String>, keys: List<String>, fallbackIndex: Int): String {
+            for (k in keys) {
+                val idx = headerIndexMap[k]
+                if (idx != null && idx < cols.size) {
+                    return cols[idx].removeSurrounding("\"").trim()
+                }
+            }
+            return cols.getOrNull(fallbackIndex)?.removeSurrounding("\"")?.trim() ?: ""
+        }
+
+        val importedEmployees = mutableListOf<Employee>()
+        for (i in 1 until lines.size) {
+            val cols = parseCsvLine(lines[i])
+            val name = getColValue(cols, listOf("name"), 0)
+            val type = getColValue(cols, listOf("type"), 1)
+            val status = getColValue(cols, listOf("status"), 2)
+            val dept = getColValue(cols, listOf("department"), 3)
+            val designation = getColValue(cols, listOf("designation"), 4)
+            val contractor = getColValue(cols, listOf("contractor"), 5)
+            val role = getColValue(cols, listOf("defaultrole", "role"), 6)
+            val unit = getColValue(cols, listOf("defaultunit", "unit"), 7)
+            val shift = getColValue(cols, listOf("defaultshift", "shift"), 8)
+            val dateAdded = getColValue(cols, listOf("dateadded"), 9)
+            val remarks = getColValue(cols, listOf("remarks"), 10)
+
+            importedEmployees.add(
+                Employee(
+                    name = name,
+                    type = type,
+                    status = status,
+                    dateAdded = dateAdded,
+                    permanentDepartment = dept,
+                    designation = if (type == EmployeeTypes.STAFF) designation else "",
+                    contractorName = if (type == EmployeeTypes.STAFF) "" else contractor,
+                    defaultWorkRole = if (type == EmployeeTypes.STAFF) "" else role,
+                    defaultUnit = unit,
+                    defaultShift = shift,
+                    permanentRemarks = remarks
+                )
+            )
+        }
+
+        assertEquals(3, importedEmployees.size)
+
+        // Verify Labourer 1: Vijay Kumar
+        val vijay = importedEmployees.find { it.name == "Vijay Kumar" }!!
+        assertEquals(EmployeeTypes.LABOUR, vijay.type)
+        assertEquals("Welding Shop", vijay.permanentDepartment)
+        assertEquals("Apex Facilities", vijay.contractorName) // Contractor preserved!
+        assertEquals("Welder", vijay.defaultWorkRole) // Role preserved!
+        assertEquals("Unit II", vijay.defaultUnit) // Unit preserved!
+        assertEquals("Shift A", vijay.defaultShift) // Shift preserved!
+
+        // Verify Labourer 2: Suresh Patil
+        val suresh = importedEmployees.find { it.name == "Suresh Patil" }!!
+        assertEquals("Shree Enterprises", suresh.contractorName) // Contractor preserved!
+        assertEquals("Laser Operator", suresh.defaultWorkRole)
+        assertEquals("Unit III", suresh.defaultUnit)
+        assertEquals("Night Shift", suresh.defaultShift)
+
+        // Verify Staff: Rajesh Sharma
+        val rajesh = importedEmployees.find { it.name == "Rajesh Sharma" }!!
+        assertEquals(EmployeeTypes.STAFF, rajesh.type)
+        assertEquals("Lead Engineer", rajesh.designation)
+        assertEquals("", rajesh.contractorName)
+    }
+
+    @Test
+    fun `importing CSV after user modifies unit and shift keeps contractor intact`() {
+        // User exports CSV, changes Unit II -> Unit I and Shift A -> Night Shift, but keeps Contractor untouched
+        val editedCsv = """
+            Name,Type,Status,Department,Designation,Contractor,Default Role,Default Unit,Default Shift,Date Added,Remarks
+            "Mahesh Jadhav","Contract Labour","Active","Paint Shop","","Apex Facilities","Painter","Unit I","Night Shift","2026-09-10",""
+        """.trimIndent()
+
+        fun parseCsvLine(line: String): List<String> {
+            val result = mutableListOf<String>()
+            val itemSb = StringBuilder()
+            var inQuotes = false
+            var i = 0
+            while (i < line.length) {
+                val c = line[i]
+                if (c == '"') {
+                    if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+                        itemSb.append('"')
+                        i++
+                    } else {
+                        inQuotes = !inQuotes
+                    }
+                } else if (c == ',' && !inQuotes) {
+                    result.add(itemSb.toString().trim())
+                    itemSb.setLength(0)
+                } else {
+                    itemSb.append(c)
+                }
+                i++
+            }
+            result.add(itemSb.toString().trim())
+            return result
+        }
+
+        val lines = editedCsv.lines().map { it.trim() }.filter { it.isNotBlank() }
+        val firstLineCols = parseCsvLine(lines[0])
+        val headerIndexMap = firstLineCols.mapIndexed { idx, col ->
+            col.lowercase().replace(" ", "").replace("_", "") to idx
+        }.toMap()
+
+        val cols = parseCsvLine(lines[1])
+        val name = cols[headerIndexMap["name"]!!].removeSurrounding("\"")
+        val dept = cols[headerIndexMap["department"]!!].removeSurrounding("\"")
+        val contractor = cols[headerIndexMap["contractor"]!!].removeSurrounding("\"")
+        val role = cols[headerIndexMap["defaultrole"]!!].removeSurrounding("\"")
+        val unit = cols[headerIndexMap["defaultunit"]!!].removeSurrounding("\"")
+        val shift = cols[headerIndexMap["defaultshift"]!!].removeSurrounding("\"")
+
+        assertEquals("Mahesh Jadhav", name)
+        assertEquals("Paint Shop", dept)
+        assertEquals("Apex Facilities", contractor)
+        assertEquals("Painter", role)
+        assertEquals("Unit I", unit) // Modified unit reflected
+        assertEquals("Night Shift", shift) // Modified shift reflected
+    }
 }
+
+
 

@@ -136,6 +136,10 @@ class ManpowerRepository(private val dao: EmployeeDao) {
         return updated.size
     }
 
+    suspend fun updateConfigItem(item: ConfigItem) {
+        dao.updateConfigItem(item)
+    }
+
     suspend fun deleteConfigItem(item: ConfigItem) {
         dao.deleteConfigItem(item)
     }

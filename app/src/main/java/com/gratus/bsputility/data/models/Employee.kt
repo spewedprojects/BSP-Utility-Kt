@@ -32,8 +32,8 @@ data class Employee(
     val contractorId: Long? = null,
     val contractorName: String = "", // Associated contractor
     val defaultWorkRole: String = "Helper", // Welder, Operator, Helper, Bender, Painter, Laser Operator
-    val defaultUnit: String = "Unit I", // Unit I, Unit II, Unit III
-    val defaultShift: String = "Shift A", // Shift A, Shift B, General
+    val defaultUnit: String = "Unit II", // Unit I, Unit II, Unit III
+    val defaultShift: String = "DAY", // Shift A, Shift B, General
     val permanentRemarks: String = "",
     val customFieldsJson: String = "{}"
 )

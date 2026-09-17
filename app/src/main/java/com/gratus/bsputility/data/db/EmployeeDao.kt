@@ -126,6 +126,9 @@ interface EmployeeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertConfigItems(items: List<ConfigItem>)
 
+    @Update
+    suspend fun updateConfigItem(item: ConfigItem)
+
     @Delete
     suspend fun deleteConfigItem(item: ConfigItem)
 }

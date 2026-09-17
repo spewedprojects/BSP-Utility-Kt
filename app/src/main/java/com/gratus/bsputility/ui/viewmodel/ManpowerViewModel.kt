@@ -715,42 +715,159 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
     // Import from CSV string
     fun importCsv(csvContent: String): Int {
-        val lines = csvContent.lines().filter { it.isNotBlank() }
-        if (lines.size <= 1) return 0
+        val lines = csvContent.lines().map { it.trim() }.filter { it.isNotBlank() }
+        if (lines.isEmpty()) return 0
 
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val contractorsMap = allContractors.value.associateBy { it.name.trim().lowercase() }
+
+        fun parseCsvLine(line: String): List<String> {
+            val result = mutableListOf<String>()
+            val sb = StringBuilder()
+            var inQuotes = false
+            var i = 0
+            while (i < line.length) {
+                val c = line[i]
+                if (c == '"') {
+                    if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+                        sb.append('"')
+                        i++
+                    } else {
+                        inQuotes = !inQuotes
+                    }
+                } else if (c == ',' && !inQuotes) {
+                    result.add(sb.toString().trim())
+                    sb.setLength(0)
+                } else {
+                    sb.append(c)
+                }
+                i++
+            }
+            result.add(sb.toString().trim())
+            return result
+        }
+
+        val firstLineCols = parseCsvLine(lines[0])
+        val hasHeader = firstLineCols.any { col ->
+            val c = col.lowercase().replace(" ", "").replace("_", "")
+            c in listOf("name", "employeename", "workername", "department", "contractor", "type", "status", "role", "designation")
+        }
+
+        val headerIndexMap = if (hasHeader) {
+            firstLineCols.mapIndexed { idx, col ->
+                col.lowercase().replace(" ", "").replace("_", "") to idx
+            }.toMap()
+        } else emptyMap()
+
+        fun getColValue(cols: List<String>, keys: List<String>, fallbackIndex: Int): String {
+            if (hasHeader) {
+                for (k in keys) {
+                    val idx = headerIndexMap[k]
+                    if (idx != null && idx < cols.size) {
+                        return cols[idx].removeSurrounding("\"").trim()
+                    }
+                }
+                return ""
+            } else {
+                return cols.getOrNull(fallbackIndex)?.removeSurrounding("\"")?.trim() ?: ""
+            }
+        }
+
+        val startIndex = if (hasHeader) 1 else 0
         val employeesToAdd = mutableListOf<Employee>()
 
-        // Expected header: Name,Type,Status,Department,Contractor,Role,Unit,Shift
-        val startIndex = if (lines[0].contains("Name", ignoreCase = true)) 1 else 0
-
         for (i in startIndex until lines.size) {
-            val cols = lines[i].split(",").map { it.trim().removeSurrounding("\"") }
-            if (cols.isNotEmpty() && cols[0].isNotBlank()) {
-                val name = cols[0]
-                val type = cols.getOrNull(1)?.ifBlank { EmployeeTypes.LABOUR } ?: EmployeeTypes.LABOUR
-                val status = cols.getOrNull(2)?.ifBlank { EmployeeStatuses.ACTIVE } ?: EmployeeStatuses.ACTIVE
-                val dept = cols.getOrNull(3)?.ifBlank { "Welding Shop" } ?: "Welding Shop"
-                val contractor = cols.getOrNull(4) ?: ""
-                val role = cols.getOrNull(5)?.ifBlank { "Helper" } ?: "Helper"
-                val unit = cols.getOrNull(6)?.ifBlank { "Unit I" } ?: "Unit I"
-                val shift = cols.getOrNull(7)?.ifBlank { "Shift A" } ?: "Shift A"
+            val cols = parseCsvLine(lines[i])
+            if (cols.isEmpty()) continue
 
-                employeesToAdd.add(
-                    Employee(
-                        name = name,
-                        type = type,
-                        status = status,
-                        dateAdded = todayStr,
-                        permanentDepartment = dept,
-                        designation = if (type == EmployeeTypes.STAFF) role else "",
-                        contractorName = if (type == EmployeeTypes.STAFF) "" else contractor,
-                        defaultWorkRole = role,
-                        defaultUnit = unit,
-                        defaultShift = shift
-                    )
-                )
+            // 1. Name
+            val name = getColValue(cols, listOf("name", "employeename", "workername", "fullname", "empname"), 0)
+            if (name.isBlank()) continue
+
+            // 2. Type
+            val rawType = getColValue(cols, listOf("type", "employeetype", "category", "emptype"), 1)
+            val type = when {
+                rawType.contains("staff", ignoreCase = true) -> EmployeeTypes.STAFF
+                rawType.contains("housekeep", ignoreCase = true) -> EmployeeTypes.HOUSEKEEPING
+                rawType.isNotBlank() -> rawType
+                else -> EmployeeTypes.LABOUR
             }
+
+            // 3. Status
+            val rawStatus = getColValue(cols, listOf("status", "employeestatus", "empstatus"), 2)
+            val status = when {
+                rawStatus.contains("out", ignoreCase = true) -> EmployeeStatuses.OUT
+                rawStatus.contains("debar", ignoreCase = true) -> EmployeeStatuses.DEBARRED
+                rawStatus.isNotBlank() -> rawStatus
+                else -> EmployeeStatuses.ACTIVE
+            }
+
+            // 4. Department
+            val dept = getColValue(cols, listOf("department", "dept", "permanentdepartment", "permdept"), 3).ifBlank { "Welding Shop" }
+
+            // 5. Designation (for Staff)
+            val designation = getColValue(cols, listOf("designation", "title", "jobtitle", "staffdesignation"), 4)
+
+            // 6. Contractor (for Labour)
+            val contractor = getColValue(
+                cols,
+                listOf("contractor", "contractorname", "agency", "vendor", "contractoragency"),
+                if (hasHeader) 5 else (if (cols.size <= 8) 4 else 5)
+            )
+
+            // 7. Default Role (for Labour)
+            val role = getColValue(
+                cols,
+                listOf("defaultrole", "role", "workrole", "defaultworkrole", "trade", "jobrole", "labourrole"),
+                if (hasHeader) 6 else (if (cols.size <= 8) 5 else 6)
+            ).ifBlank { "Helper" }
+
+            // 8. Default Unit
+            val unit = getColValue(
+                cols,
+                listOf("defaultunit", "unit", "plant", "workunit"),
+                if (hasHeader) 7 else (if (cols.size <= 8) 6 else 7)
+            ).ifBlank { "Unit I" }
+
+            // 9. Default Shift
+            val shift = getColValue(
+                cols,
+                listOf("defaultshift", "shift", "workshift"),
+                if (hasHeader) 8 else (if (cols.size <= 8) 7 else 8)
+            ).ifBlank { "Shift A" }
+
+            // 10. Date Added
+            val dateAdded = getColValue(
+                cols,
+                listOf("dateadded", "date", "joiningdate", "createdat"),
+                9
+            ).ifBlank { todayStr }
+
+            // 11. Remarks
+            val remarks = getColValue(
+                cols,
+                listOf("remarks", "permanentremarks", "note", "notes", "comments"),
+                10
+            )
+
+            val matchedContractor = if (type == EmployeeTypes.STAFF) null else contractorsMap[contractor.lowercase()]
+
+            employeesToAdd.add(
+                Employee(
+                    name = name,
+                    type = type,
+                    status = status,
+                    dateAdded = dateAdded,
+                    permanentDepartment = dept,
+                    designation = if (type == EmployeeTypes.STAFF) designation.ifBlank { role } else "",
+                    contractorId = matchedContractor?.id,
+                    contractorName = if (type == EmployeeTypes.STAFF) "" else contractor,
+                    defaultWorkRole = if (type == EmployeeTypes.STAFF) "" else role,
+                    defaultUnit = unit,
+                    defaultShift = shift,
+                    permanentRemarks = remarks
+                )
+            )
         }
 
         if (employeesToAdd.isNotEmpty()) {
@@ -945,6 +1062,13 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun updateConfigItem(item: ConfigItem) {
+        if (item.name.isBlank()) return
+        viewModelScope.launch {
+            repository.updateConfigItem(item.copy(name = item.name.trim()))
+        }
+    }
+
     fun deleteConfigItem(item: ConfigItem) {
         viewModelScope.launch {
             repository.deleteConfigItem(item)
@@ -1118,18 +1242,22 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     fun generateRoosterCsv(): String {
         val sb = StringBuilder()
         sb.append("Name,Type,Status,Department,Designation,Contractor,Default Role,Default Unit,Default Shift,Date Added,Remarks\n")
+        fun escapeCsv(s: String): String {
+            val escaped = s.replace("\"", "\"\"")
+            return "\"$escaped\""
+        }
         allEmployees.value.forEach { emp ->
-            sb.append("\"${emp.name}\",")
-            sb.append("\"${emp.type}\",")
-            sb.append("\"${emp.status}\",")
-            sb.append("\"${emp.permanentDepartment}\",")
-            sb.append("\"${emp.designation}\",")
-            sb.append("\"${emp.contractorName}\",")
-            sb.append("\"${emp.defaultWorkRole}\",")
-            sb.append("\"${emp.defaultUnit}\",")
-            sb.append("\"${emp.defaultShift}\",")
-            sb.append("\"${emp.dateAdded}\",")
-            sb.append("\"${emp.permanentRemarks}\"\n")
+            sb.append(escapeCsv(emp.name)).append(",")
+            sb.append(escapeCsv(emp.type)).append(",")
+            sb.append(escapeCsv(emp.status)).append(",")
+            sb.append(escapeCsv(emp.permanentDepartment)).append(",")
+            sb.append(escapeCsv(emp.designation)).append(",")
+            sb.append(escapeCsv(emp.contractorName)).append(",")
+            sb.append(escapeCsv(emp.defaultWorkRole)).append(",")
+            sb.append(escapeCsv(emp.defaultUnit)).append(",")
+            sb.append(escapeCsv(emp.defaultShift)).append(",")
+            sb.append(escapeCsv(emp.dateAdded)).append(",")
+            sb.append(escapeCsv(emp.permanentRemarks)).append("\n")
         }
         return sb.toString()
     }

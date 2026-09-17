@@ -106,6 +106,7 @@ fun MasterDataScreen(
             Toast.makeText(context, "Deleted ${it.name}", Toast.LENGTH_SHORT).show()
         },
         onAddConfigItem = { cat, name, type -> viewModel.addConfigItem(cat, name, type) },
+        onUpdateConfigItem = { viewModel.updateConfigItem(it) },
         onDeleteConfigItem = {
             viewModel.deleteConfigItem(it)
             Toast.makeText(context, "Removed ${it.name}", Toast.LENGTH_SHORT).show()
@@ -128,6 +129,7 @@ fun MasterDataScreenContent(
     onUpdateContractor: (Contractor) -> Unit,
     onDeleteContractor: (Contractor) -> Unit,
     onAddConfigItem: (category: String, name: String, fieldType: String) -> Unit,
+    onUpdateConfigItem: (ConfigItem) -> Unit = {},
     onDeleteConfigItem: (ConfigItem) -> Unit,
     initialTab: String = "Contractors",
     modifier: Modifier = Modifier
@@ -139,6 +141,7 @@ fun MasterDataScreenContent(
     var showAddContractorDialog by remember { mutableStateOf<Contractor?>(null) }
     var isNewContractor by remember { mutableStateOf(false) }
     var showAddConfigDialog by remember { mutableStateOf(false) }
+    var editingConfigItem by remember { mutableStateOf<ConfigItem?>(null) }
     var newConfigCategory by remember { mutableStateOf("DEPARTMENT") }
 
     Box(
@@ -430,7 +433,7 @@ fun MasterDataScreenContent(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = item.name,
                                         fontWeight = FontWeight.SemiBold,
@@ -466,10 +469,17 @@ fun MasterDataScreenContent(
                                     }
                                 }
 
-                                IconButton(onClick = {
-                                    onDeleteConfigItem(item)
-                                }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
+                                Row {
+                                    IconButton(onClick = {
+                                        editingConfigItem = item
+                                    }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                    IconButton(onClick = {
+                                        onDeleteConfigItem(item)
+                                    }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
+                                    }
                                 }
                             }
                         }
@@ -498,6 +508,7 @@ fun MasterDataScreenContent(
                             "Labour Roles" -> "LABOUR_ROLE"
                             else -> "CUSTOM_FIELD"
                         }
+                        editingConfigItem = null
                         showAddConfigDialog = true
                     }
                 },
@@ -527,16 +538,27 @@ fun MasterDataScreenContent(
         )
     }
 
-    // Modal: Add Config Item (Department, Role, Unit, Custom field)
-    if (showAddConfigDialog) {
+    // Modal: Add / Edit Config Item (Department, Role, Unit, Custom field)
+    if (showAddConfigDialog || editingConfigItem != null) {
+        val targetCat = editingConfigItem?.category ?: newConfigCategory
         AddConfigDialog(
-            category = newConfigCategory,
+            category = targetCat,
             tabTitle = selectedTab,
+            configItem = editingConfigItem,
             availableDepartments = allConfigs.filter { it.category == "DEPARTMENT" }.map { it.name },
-            onDismiss = { showAddConfigDialog = false },
-            onSave = { name, fieldType ->
-                onAddConfigItem(newConfigCategory, name, fieldType)
+            onDismiss = {
                 showAddConfigDialog = false
+                editingConfigItem = null
+            },
+            onSave = { name, fieldType ->
+                val currentEditing = editingConfigItem
+                if (currentEditing != null) {
+                    onUpdateConfigItem(currentEditing.copy(name = name, extraType = fieldType))
+                } else {
+                    onAddConfigItem(targetCat, name, fieldType)
+                }
+                showAddConfigDialog = false
+                editingConfigItem = null
             }
         )
     }
@@ -612,17 +634,52 @@ fun AddContractorDialog(
 fun AddConfigDialog(
     category: String,
     tabTitle: String,
+    configItem: ConfigItem? = null,
     availableDepartments: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (name: String, fieldType: String) -> Unit
 ) {
-    var itemName by remember { mutableStateOf("") }
-    var fieldType by remember { mutableStateOf("TEXT") }
-    var targetAudience by remember { mutableStateOf("ALL") } // ALL, STAFF, LABOUR
-    var selectedDepts by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val isEditing = configItem != null
+    var itemName by remember(configItem) { mutableStateOf(configItem?.name ?: "") }
+
+    val (initialFieldType, initialTargetAudience) = remember(configItem) {
+        if (category == "CUSTOM_FIELD" && configItem != null) {
+            val parts = configItem.extraType.split("|")
+            val fType = parts.getOrNull(0)?.ifBlank { "TEXT" } ?: "TEXT"
+            val target = parts.getOrNull(1)?.ifBlank { "ALL" } ?: "ALL"
+            Pair(fType, target)
+        } else {
+            Pair("TEXT", "ALL")
+        }
+    }
+    var fieldType by remember(initialFieldType) { mutableStateOf(initialFieldType) }
+    var targetAudience by remember(initialTargetAudience) { mutableStateOf(initialTargetAudience) } // ALL, STAFF, LABOUR
+
+    val initialDepts = remember(configItem) {
+        if (category == "LABOUR_ROLE" && configItem != null) {
+            val extra = configItem.extraType.trim()
+            if (extra.isNotBlank() && !extra.equals("ALL", ignoreCase = true)) {
+                extra.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+            } else {
+                emptySet()
+            }
+        } else {
+            emptySet()
+        }
+    }
+    var selectedDepts by remember(initialDepts) { mutableStateOf<Set<String>>(initialDepts) }
     var deptDropdownOpen by remember { mutableStateOf(false) }
 
-    val dialogTitle = if (tabTitle == "Shifts") "Add Shift" else "Add to ${tabTitle.removeSuffix("s")}"
+    val singularTitle = when (tabTitle) {
+        "Departments" -> "Department"
+        "Designations" -> "Designation"
+        "Units" -> "Unit"
+        "Shifts" -> "Shift"
+        "Labour Roles" -> "Labour Role"
+        "Custom Fields" -> "Custom Field"
+        else -> tabTitle.removeSuffix("s")
+    }
+    val dialogTitle = if (isEditing) "Edit $singularTitle" else (if (tabTitle == "Shifts") "Add Shift" else "Add to $singularTitle")
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -750,7 +807,7 @@ fun AddConfigDialog(
                     onSave(itemName.trim(), finalExtraType)
                 }
             }) {
-                Text("Add")
+                Text(if (isEditing) "Save" else "Add")
             }
         },
         dismissButton = {

@@ -16,8 +16,8 @@ android {
     applicationId = "com.gratus.bsputility"
     minSdk = 24
     targetSdk = 37
-    versionCode = 7
-    versionName = "2.2.0"
+    versionCode = 8
+    versionName = "2.3.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -45,6 +45,10 @@ android {
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
+    }
+    debug {
+      applicationIdSuffix = ".debug"
+      versionNameSuffix = "-debug"
     }
   }
   compileOptions {

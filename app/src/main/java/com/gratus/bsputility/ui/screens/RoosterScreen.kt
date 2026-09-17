@@ -1630,12 +1630,23 @@ fun JsonBackupDialog(
                     Button(
                         onClick = {
                             if (jsonInput.isNotBlank()) {
-                                val success = onImportJson(jsonInput)
-                                if (success) {
-                                    Toast.makeText(context, "Master data replaced successfully!", Toast.LENGTH_LONG).show()
-                                    onDismiss()
+                                val isCsv = !jsonInput.trimStart().startsWith("{") && !jsonInput.trimStart().startsWith("[")
+                                if (isCsv && onImportCsv != null) {
+                                    val success = onImportCsv(jsonInput)
+                                    if (success) {
+                                        Toast.makeText(context, "Employee rooster replaced from CSV successfully!", Toast.LENGTH_LONG).show()
+                                        onDismiss()
+                                    } else {
+                                        Toast.makeText(context, "Failed to parse CSV format!", Toast.LENGTH_SHORT).show()
+                                    }
                                 } else {
-                                    Toast.makeText(context, "Invalid JSON format!", Toast.LENGTH_SHORT).show()
+                                    val success = onImportJson(jsonInput)
+                                    if (success) {
+                                        Toast.makeText(context, "Master data replaced successfully!", Toast.LENGTH_LONG).show()
+                                        onDismiss()
+                                    } else {
+                                        Toast.makeText(context, "Invalid JSON format!", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         },

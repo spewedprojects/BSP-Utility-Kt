@@ -62,6 +62,8 @@ import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeTypes
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material3.darkColorScheme
 import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
@@ -74,6 +76,8 @@ import com.gratus.bsputility.ui.theme.PresentGreenLight
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 
 import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
 import androidx.compose.material.icons.filled.Refresh
 import com.gratus.bsputility.ui.theme.IndustrialNavy900
 
@@ -91,6 +95,11 @@ fun VerificationScreen(
     val yesterdayDeptCounts by viewModel.yesterdayDepartmentPresentCounts.collectAsStateWithLifecycle()
     val twoDaysAgoDeptCounts by viewModel.twoDaysAgoDepartmentPresentCounts.collectAsStateWithLifecycle()
     val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
+
+    val isToday = remember(selectedDate) {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        selectedDate == today
+    }
 
     val day1Label = remember(selectedDate) {
         val d = viewModel.getDayOfWeekAbbreviation(selectedDate, 1)
@@ -142,6 +151,7 @@ fun VerificationScreen(
         twoDaysAgoDeptCounts = twoDaysAgoDeptCounts,
         day1Label = day1Label,
         day2Label = day2Label,
+        isToday = isToday,
         onVerify = { deptName, staffId, staffName, isVerified, remarks ->
             viewModel.verifyDepartment(deptName, staffId, staffName, isVerified, remarks)
         },
@@ -163,6 +173,7 @@ fun VerificationScreenContent(
     twoDaysAgoDeptCounts: Map<String, Int> = emptyMap(),
     day1Label: String = "-1",
     day2Label: String = "-2",
+    isToday: Boolean = true,
     onVerify: (deptName: String, staffId: Long?, staffName: String, isVerified: Boolean, remarks: String) -> Unit,
     onMarkSameAsDay: (deptName: String, dayOffset: Int) -> Unit = { _, _ -> },
     onMarkSameAsYesterday: (deptName: String) -> Unit = { onMarkSameAsDay(it, 1) },
@@ -288,6 +299,7 @@ fun VerificationScreenContent(
                         twoDaysAgoCount = y2Count,
                         day1Label = day1Label,
                         day2Label = day2Label,
+                        isToday = isToday,
                         onVerify = { staffId, staffName, isVerified, remarks ->
                             onVerify(deptName, staffId, staffName, isVerified, remarks)
                         },
@@ -318,6 +330,7 @@ fun DepartmentVerificationCard(
     twoDaysAgoCount: Int = 0,
     day1Label: String = "-1",
     day2Label: String = "-2",
+    isToday: Boolean = true,
     onVerify: (staffId: Long?, staffName: String, isVerified: Boolean, remarks: String) -> Unit,
     onMarkSameAsDay: (dayOffset: Int) -> Unit = {},
     onMarkSameAsYesterday: () -> Unit = { onMarkSameAsDay(1) },
@@ -369,15 +382,7 @@ fun DepartmentVerificationCard(
                             color = MaterialTheme.colorScheme.onSecondary
                         )
                         Text(
-                            text = if (labourList.isNotEmpty()) {
-                                "${labourList.size} Labourers Assigned Today"
-                            } else if (yesterdayCount > 0) {
-                                "0 Assigned Today ($yesterdayCount present $day1Label)"
-                            } else if (twoDaysAgoCount > 0) {
-                                "0 Assigned Today ($twoDaysAgoCount present $day2Label)"
-                            } else {
-                                "0 Labourers Assigned"
-                            },
+                            text = "${labourList.size} Labourers Assigned Today",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -414,7 +419,7 @@ fun DepartmentVerificationCard(
             }
 
             // Action: Mark Present Same as -1d or -2d
-            if (yesterdayCount > 0 || twoDaysAgoCount > 0) {
+            if (isToday && (yesterdayCount > 0 || twoDaysAgoCount > 0)) {
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f),
@@ -670,13 +675,16 @@ fun LabourGroupedList(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(4.dp)
                 ) {
-                    Text(
-                        text = "DAY SHIFT (${dayWorkers.size})",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.LightMode, contentDescription = null, modifier = Modifier.size(16.dp).padding(start = 4.dp))
+                        Text(
+                            text = "DAY SHIFT (${dayWorkers.size})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
             LabourRoleSection(workers = dayWorkers)
@@ -684,17 +692,19 @@ fun LabourGroupedList(
 
         if (nightWorkers.isNotEmpty()) {
             Surface(
-                color = IndustrialNavy900.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(4.dp),
-                border = BorderStroke(1.dp, IndustrialNavy900.copy(alpha = 0.2f))
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(4.dp)
             ) {
-                Text(
-                    text = "🌙 NIGHT SHIFT (${nightWorkers.size})",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Nightlight, contentDescription = null, modifier = Modifier.size(16.dp).padding(start = 4.dp))
+                    Text(
+                        text = "NIGHT SHIFT (${nightWorkers.size})",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
             LabourRoleSection(workers = nightWorkers)
         }
@@ -708,7 +718,10 @@ fun LabourRoleSection(
     val roleGroups = workers.groupBy { it.effectiveWorkRole.ifBlank { "Helper" } }
     val showRoleHeadings = roleGroups.keys.size > 1
 
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.padding(start = 6.dp)
+    ) {
         roleGroups.forEach { (role, roleWorkers) ->
             if (showRoleHeadings) {
                 Text(
@@ -761,7 +774,7 @@ fun VerificationScreenPreview_MixedProgress() {
     val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
     val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
     val verifMap = PreviewData.sampleVerifications.associateBy { it.departmentName }
-    val depts = listOf("Welding Shop", "Laser Cutting", "Fabrication", "Press Shop")
+    val depts = listOf("Fabrication", "Laser Cutting", "Press Shop", "Welding Shop")
     val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
 
     MyApplicationTheme(darkTheme = false) {
@@ -771,7 +784,13 @@ fun VerificationScreenPreview_MixedProgress() {
             verifMap = verifMap,
             staffList = staffList,
             verifiedCount = 2,
-            onVerify = { _, _, _, _, _ -> }
+            yesterdayDeptCounts = mapOf("Welding Shop" to 3, "Fabrication" to 2, "Press Shop" to 4, "Laser Cutting" to 2),
+            twoDaysAgoDeptCounts = mapOf("Welding Shop" to 4, "Fabrication" to 2, "Press Shop" to 3, "Laser Cutting" to 1),
+            day1Label = "-1 (Wed)",
+            day2Label = "-2 (Tue)",
+            isToday = true,
+            onVerify = { _, _, _, _, _ -> },
+            onMarkSameAsDay = { _, _ -> }
         )
     }
 }
@@ -781,26 +800,32 @@ fun VerificationScreenPreview_MixedProgress() {
 fun VerificationScreenPreview_FullyVerified() {
     val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
     val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
-    val depts = listOf("Welding Shop", "Laser Cutting", "Fabrication", "Press Shop")
+    val depts = listOf("Fabrication", "Laser Cutting", "Press Shop", "Welding Shop")
     val verifMap = depts.associateWith { d ->
         DepartmentVerification(
             departmentName = d,
             isVerified = true,
             verifiedByStaffName = "Rahul Kulkarni",
             verifiedAtTime = "10:15 AM",
-            date = "2026-09-10"
+            date = "2026-09-17"
         )
     }
     val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
 
-    MyApplicationTheme {
+    MyApplicationTheme(darkTheme = false) {
         VerificationScreenContent(
             allDepts = depts,
             deptMap = deptMap,
             verifMap = verifMap,
             staffList = staffList,
             verifiedCount = 4,
-            onVerify = { _, _, _, _, _ -> }
+            yesterdayDeptCounts = mapOf("Welding Shop" to 3, "Laser Cutting" to 2),
+            twoDaysAgoDeptCounts = mapOf("Welding Shop" to 4, "Laser Cutting" to 1),
+            day1Label = "-1 (Wed)",
+            day2Label = "-2 (Tue)",
+            isToday = false,
+            onVerify = { _, _, _, _, _ -> },
+            onMarkSameAsDay = { _, _ -> }
         )
     }
 }
@@ -810,17 +835,46 @@ fun VerificationScreenPreview_FullyVerified() {
 fun VerificationScreenPreview_AllPending() {
     val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
     val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
-    val depts = listOf("Welding Shop", "Laser Cutting", "Fabrication", "Press Shop")
+    val depts = listOf("Fabrication", "Laser Cutting", "Press Shop", "Welding Shop")
     val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
 
-    MyApplicationTheme {
+    MyApplicationTheme(darkTheme = false) {
         VerificationScreenContent(
             allDepts = depts,
             deptMap = deptMap,
             verifMap = emptyMap(),
             staffList = staffList,
             verifiedCount = 0,
-            onVerify = { _, _, _, _, _ -> }
+            yesterdayDeptCounts = mapOf("Welding Shop" to 3, "Fabrication" to 2, "Press Shop" to 4, "Laser Cutting" to 2),
+            twoDaysAgoDeptCounts = mapOf("Welding Shop" to 4, "Fabrication" to 2, "Press Shop" to 3, "Laser Cutting" to 1),
+            day1Label = "-1 (Wed)",
+            day2Label = "-2 (Tue)",
+            isToday = true,
+            onVerify = { _, _, _, _, _ -> },
+            onMarkSameAsDay = { _, _ -> }
+        )
+    }
+}
+
+@Preview(name = "Verification Screen - Empty State (No Active Depts)", showBackground = true)
+@Composable
+fun VerificationScreenPreview_Empty() {
+    val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
+
+    MyApplicationTheme(darkTheme = false) {
+        VerificationScreenContent(
+            allDepts = emptyList(),
+            deptMap = emptyMap(),
+            verifMap = emptyMap(),
+            staffList = staffList,
+            verifiedCount = 0,
+            yesterdayDeptCounts = emptyMap(),
+            twoDaysAgoDeptCounts = emptyMap(),
+            day1Label = "-1 (Wed)",
+            day2Label = "-2 (Tue)",
+            isToday = true,
+            onVerify = { _, _, _, _, _ -> },
+            onMarkSameAsDay = { _, _ -> }
         )
     }
 }
@@ -831,7 +885,7 @@ fun VerificationScreenPreview_DarkTheme() {
     val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
     val deptMap = presentLabourers.groupBy { it.effectiveDepartment }
     val verifMap = PreviewData.sampleVerifications.associateBy { it.departmentName }
-    val depts = listOf("Welding Shop", "Laser Cutting", "Fabrication", "Press Shop")
+    val depts = listOf("Fabrication", "Laser Cutting", "Press Shop", "Welding Shop")
     val staffList = PreviewData.sampleEmployees.filter { it.type == EmployeeTypes.STAFF }
 
     MyApplicationTheme(darkTheme = true) {
@@ -841,12 +895,18 @@ fun VerificationScreenPreview_DarkTheme() {
             verifMap = verifMap,
             staffList = staffList,
             verifiedCount = 2,
-            onVerify = { _, _, _, _, _ -> }
+            yesterdayDeptCounts = mapOf("Welding Shop" to 3, "Fabrication" to 2, "Press Shop" to 4, "Laser Cutting" to 2),
+            twoDaysAgoDeptCounts = mapOf("Welding Shop" to 4, "Fabrication" to 2, "Press Shop" to 3, "Laser Cutting" to 1),
+            day1Label = "-1 (Wed)",
+            day2Label = "-2 (Tue)",
+            isToday = true,
+            onVerify = { _, _, _, _, _ -> },
+            onMarkSameAsDay = { _, _ -> }
         )
     }
 }
 
-@Preview(name = "Department Verification Cards - Pending vs Verified", showBackground = true)
+@Preview(name = "Department Verification Cards - States", showBackground = true)
 @Composable
 fun DepartmentVerificationCards_Preview() {
     val presentLabourers = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
@@ -860,23 +920,80 @@ fun DepartmentVerificationCards_Preview() {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 1. Verified Card
+            // 1. Verified Card (with active labourers and verified stamp)
             DepartmentVerificationCard(
                 departmentName = "Welding Shop",
                 labourList = deptMap["Welding Shop"] ?: emptyList(),
                 verification = PreviewData.sampleVerifications[0],
                 staffList = staffList,
-                onVerify = { _, _, _, _ -> }
+                yesterdayCount = 3,
+                twoDaysAgoCount = 4,
+                day1Label = "-1 (Wed)",
+                day2Label = "-2 (Tue)",
+                isToday = true,
+                onVerify = { _, _, _, _ -> },
+                onMarkSameAsDay = {}
             )
 
-            // 2. Pending Card
+            // 2. Pending Card (with active labourers and action buttons)
             DepartmentVerificationCard(
-                departmentName = "Fabrication",
-                labourList = deptMap["Fabrication"] ?: emptyList(),
-                verification = PreviewData.sampleVerifications[2],
+                departmentName = "Laser Cutting",
+                labourList = deptMap["Laser Cutting"] ?: emptyList(),
+                verification = PreviewData.sampleVerifications[2], // Pending
                 staffList = staffList,
-                onVerify = { _, _, _, _ -> }
+                yesterdayCount = 2,
+                twoDaysAgoCount = 1,
+                day1Label = "-1 (Wed)",
+                day2Label = "-2 (Tue)",
+                isToday = true,
+                onVerify = { _, _, _, _ -> },
+                onMarkSameAsDay = {}
             )
+
+            // 3. Pending Card with 0 Assigned Today but History Available
+            DepartmentVerificationCard(
+                departmentName = "Press Shop",
+                labourList = emptyList(),
+                verification = null,
+                staffList = staffList,
+                yesterdayCount = 4,
+                twoDaysAgoCount = 3,
+                day1Label = "-1 (Wed)",
+                day2Label = "-2 (Tue)",
+                isToday = true,
+                onVerify = { _, _, _, _ -> },
+                onMarkSameAsDay = {}
+            )
+        }
+    }
+}
+
+@Preview(name = "Labour Grouped List - Day & Night Shifts", showBackground = true)
+@Composable
+fun LabourGroupedList_Preview() {
+    val dayLabour = PreviewData.sampleAttendanceItems.filter { it.isPresent && it.employee.type != EmployeeTypes.STAFF }
+    val nightWorker = PreviewData.sampleAttendanceItems[4].copy(
+        effectiveShift = "Night Shift",
+        effectiveWorkRole = "Laser Operator"
+    )
+    val combinedList = dayLabour + nightWorker
+
+    MyApplicationTheme {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "Assigned Workers Breakdown Preview",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                LabourGroupedList(labourList = combinedList)
+            }
         }
     }
 }
