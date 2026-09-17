@@ -75,6 +75,9 @@ interface EmployeeDao {
     @Query("SELECT * FROM daily_attendance WHERE date = :date")
     suspend fun getAttendanceListForDate(date: String): List<DailyAttendance>
 
+    @Query("SELECT * FROM daily_attendance")
+    suspend fun getAllAttendanceRecords(): List<DailyAttendance>
+
     @Query("DELETE FROM employees")
     suspend fun deleteAllEmployees()
 
@@ -84,9 +87,18 @@ interface EmployeeDao {
     @Query("DELETE FROM config_items")
     suspend fun deleteAllConfigItems()
 
+    @Query("DELETE FROM daily_attendance")
+    suspend fun deleteAllDailyAttendance()
+
+    @Query("DELETE FROM department_verifications")
+    suspend fun deleteAllDepartmentVerifications()
+
     // --- DEPARTMENT VERIFICATIONS ---
     @Query("SELECT * FROM department_verifications WHERE date = :date ORDER BY departmentName ASC")
     fun getVerificationsForDate(date: String): Flow<List<DepartmentVerification>>
+
+    @Query("SELECT * FROM department_verifications ORDER BY date ASC, departmentName ASC")
+    suspend fun getAllVerificationsList(): List<DepartmentVerification>
 
     @Query("SELECT * FROM department_verifications WHERE date = :date AND departmentName = :dept LIMIT 1")
     suspend fun getVerification(date: String, dept: String): DepartmentVerification?
@@ -100,6 +112,9 @@ interface EmployeeDao {
     // --- CONTRACTORS ---
     @Query("SELECT * FROM contractors ORDER BY name ASC")
     fun getAllContractors(): Flow<List<Contractor>>
+
+    @Query("SELECT * FROM contractors ORDER BY name ASC")
+    suspend fun getAllContractorsList(): List<Contractor>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertContractor(contractor: Contractor): Long
@@ -119,6 +134,9 @@ interface EmployeeDao {
 
     @Query("SELECT * FROM config_items ORDER BY category ASC, name ASC")
     fun getAllConfigItems(): Flow<List<ConfigItem>>
+
+    @Query("SELECT * FROM config_items ORDER BY category ASC, name ASC")
+    suspend fun getAllConfigItemsList(): List<ConfigItem>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertConfigItem(item: ConfigItem): Long

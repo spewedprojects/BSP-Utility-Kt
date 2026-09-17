@@ -1,30 +1,57 @@
-# CHANGES v2.2.0: Implementation of Issues #21, #22
+# CHANGES v2.4.0: Implementation of Issues #23 - Architecture & Disaster Recovery Walkthrough
 
-Resolved all 2 requested issues.
+---
+## 1. Executive Summary & Root Cause Analysis
+
+### What Happened to the Historical Records?
+When an employee roster CSV / JSON was imported previously, the application performed a destructive `deleteAllEmployees()` followed by re-inserting employees with fresh auto-incremented database IDs (`employeeId = 1, 2, ...`).
+
+- **Good News**: **Your past daily attendance records were NEVER deleted from the SQLite database.** The table `daily_attendance` preserves the historical logs along with worker names (`employeeName`), dates, departments, and roles.
+- **The "Fracture"**: The attendance UI matched attendance rows using the foreign key `employeeId`. Because the newly inserted workers had brand new IDs, the foreign key link broke, causing workers to appear unmarked on historical dates.
 
 ---
 
-## Key Changes Summary
+## 2. Permanent Architectural Solution
 
-### 1. Issue #21: Editing Pre-Existing Master Data Roles & Config Items (Backwards Compatible)
-- **Edit Option for Master Items**: Added an Edit icon button to all Config Item cards (Departments, Designations, Units, Shifts, Labour Roles, Custom Fields) on the [`MasterDataScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/MasterDataScreen.kt).
-- **Edit Dialog**: Updated `AddConfigDialog` to support both Add and Edit modes. When editing an existing Labour Role, its current associated departments are pre-selected in chips and dropdowns. When editing Custom Fields, the field type and target audience are pre-loaded.
-- **Backwards Compatibility**:
-  - Existing/seeded roles with blank or `"ALL"` `extraType` remain applicable to all departments by default.
-  - Editing a role immediately updates its `ConfigItem.extraType` and dynamically takes effect across [`AttendanceLabourDialog`](app/src/main/java/com/gratus/bsputility/ui/components/AttendanceLabourDialog.kt), [`AttendanceScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/AttendanceScreen.kt), and [`RoosterScreen`](app/src/main/java/com/gratus/bsputility/ui/screens/RoosterScreen.kt).
-- **DAO & ViewModel Support**: Added `@Update suspend fun updateConfigItem` in [`EmployeeDao`](app/src/main/java/com/gratus/bsputility/data/db/EmployeeDao.kt), [`ManpowerRepository`](app/src/main/java/com/gratus/bsputility/data/repository/ManpowerRepository.kt), and [`ManpowerViewModel`](app/src/main/java/com/gratus/bsputility/ui/viewmodel/ManpowerViewModel.kt).
+We replaced the brittle delete-and-reinsert flow with an **In-Place Non-Destructive Upsert & Synchronization System** accompanied by an **Auto-Healing Re-linker** and a **Complete Database Disaster Recovery & Backup Suite**.
 
-### 2. Issue #22: Importing CSV Schema Mismatch & Contractor Link Preservation
-- **Bug Discovery**: `generateRoosterCsv()` exported 11 columns (`Name, Type, Status, Department, Designation, Contractor, Default Role, Default Unit, Default Shift, Date Added, Remarks`), whereas legacy `importCsv()` expected an 8-column layout without `Designation`. When re-importing an exported CSV:
-  - Column 4 (`Designation`, empty for labour) was read as Contractor name (clearing contractor links).
-  - Column 5 (`Contractor`) was read as Role (making Contractor name become the Role).
-  - Column 6 (`Default Role`) was read as Unit.
-  - Column 7 (`Default Unit`) was read as Shift.
-- **Fix**:
-  - Re-engineered `importCsv()` in [`ManpowerViewModel.kt`](app/src/main/java/com/gratus/bsputility/ui/viewmodel/ManpowerViewModel.kt) to be dynamically **header-aware** (case-insensitive name matching for all columns).
-  - Added full RFC-4180 parsing supporting quotes, escaped quotes (`""`), and commas within fields.
-  - Added backwards-compatibility fallbacks for legacy 8-column CSVs as well as new 11-column CSVs.
-  - Matched and linked `contractorId` with `allContractors` during CSV import.
-  - Updated [`RoosterScreen.kt`](app/src/main/java/com/gratus/bsputility/ui/screens/RoosterScreen.kt) to allow importing from both pasted CSV and pasted JSON in the text restore dialog.
+```mermaid
+flowchart TD
+    A[Incoming CSV / JSON Roster] --> B[syncEmployeesRosterUpsert]
+    B --> C{Worker exists in DB?}
+    C -->|Yes: Matched by ID, Name+Contractor, or Name| D[Update in place: preserve primary key ID & joining date]
+    C -->|No: Brand new worker| E[Insert with new auto-increment ID]
+    B --> F[Workers omitted from incoming roster]
+    F --> G[Soft-archive: status = Out. NEVER hard delete!]
+    D --> H[relinkAttendanceRecordsByName]
+    E --> H
+    G --> H
+    H --> I[Auto-heals all past daily_attendance rows by employeeName]
+```
+
+---
+
+## 3. Changes Implemented
+
+### 1. Auto-Healing & Non-Destructive Upsert
+- [`ManpowerRepository.kt`](file:///c:/Users/rkhar/Documents/ANDROID%20APPS/BSPUtility/app/src/main/java/com/gratus/bsputility/data/repository/ManpowerRepository.kt):
+  - **`relinkAttendanceRecordsByName()`**: Automatically scans all historical `daily_attendance` records in SQLite and re-links their `employeeId` and `employeeType` to the active employee ID matching `employeeName`.
+  - **`syncEmployeesRosterUpsert()`**: Matches incoming roster entries by `id` $\rightarrow$ `(name + contractor)` $\rightarrow$ `name`. Updates fields in place without modifying existing primary keys. Omitted workers are marked with `status = "Out"` to preserve historical referential integrity.
+  - Automatic re-linking runs in `ManpowerViewModel.init` on app startup and whenever a roster sync or backup restore occurs.
+
+### 2. Full Database Backup & Disaster Recovery (Settings $\rightarrow$ Preferences)
+- [`ManpowerViewModel.kt`](file:///c:/Users/rkhar/Documents/ANDROID%20APPS/BSPUtility/app/src/main/java/com/gratus/bsputility/ui/viewmodel/ManpowerViewModel.kt):
+  - **`exportCompleteDatabaseBackupJson()`**: Exports an all-inclusive JSON snapshot containing:
+    1. Employee library (`employees`)
+    2. Contractor profiles (`contractors`)
+    3. Master categories & custom fields (`configItems`)
+    4. **All historical daily attendance records across ALL dates** (`dailyAttendance`)
+    5. **All daily supervisor sign-off verifications** (`departmentVerifications`)
+  - **`restoreCompleteDatabaseBackupJson()`**: Reconstitutes the entire database state from backup JSON and auto-heals relations.
+- [`MasterDataScreen.kt`](file:///c:/Users/rkhar/Documents/ANDROID%20APPS/BSPUtility/app/src/main/java/com/gratus/bsputility/ui/screens/MasterDataScreen.kt):
+  - Added the **"Full Database Backup & Disaster Recovery"** card in **Settings $\rightarrow$ Preferences**.
+  - **Export Complete Database Backup (.JSON)**: Saves to `Documents/BSPManpower/BSP_Full_Database_Backup_[timestamp].json` and copies to clipboard.
+  - **Restore Database / Disaster Recovery**: Dialog allowing file selection (`.json`) or raw text paste with safety confirmation.
+  - Added maintenance button **"Re-link Attendance History by Worker Name"**.
 
 ---

@@ -22,7 +22,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -93,6 +95,9 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     init {
         val db = AppDatabase.getDatabase(application)
         repository = ManpowerRepository(db.employeeDao())
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.relinkAttendanceRecordsByName()
+        }
     }
 
     val allEmployees: StateFlow<List<Employee>> = repository.allEmployees
@@ -174,6 +179,9 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             }
+        }
+        viewModelScope.launch {
+            repository.relinkAttendanceRecordsByName()
         }
     }
 
@@ -282,11 +290,12 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         allEmployees,
         _attendanceStream
     ) { employees, attendances ->
-        val attendanceMap = attendances.associateBy { it.employeeId }
+        val attendanceById = attendances.associateBy { it.employeeId }
+        val attendanceByName = attendances.associateBy { it.employeeName.trim().lowercase() }
         val activeEmployees = employees.filter { it.status != EmployeeStatuses.OUT }
 
         activeEmployees.map { emp ->
-            val att = attendanceMap[emp.id]
+            val att = attendanceById[emp.id] ?: attendanceByName[emp.name.trim().lowercase()]
             EmployeeAttendanceItem(
                 employee = emp,
                 isPresent = att?.isPresent ?: false,
@@ -346,7 +355,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         allConfigItems
     ) { employees, attendances, verifications, configs ->
         val presentRecords = attendances.filter { it.isPresent }
-        val empMap = employees.associateBy { it.id }
+        val empById = employees.associateBy { it.id }
+        val empByName = employees.associateBy { it.name.trim().lowercase() }
 
         var staffCount = 0
         var labourCount = 0
@@ -361,7 +371,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         val shiftMap = mutableMapOf<String, Int>()
 
         presentRecords.forEach { att ->
-            val emp = empMap[att.employeeId]
+            val emp = empById[att.employeeId] ?: empByName[att.employeeName.trim().lowercase()]
             val type = emp?.type ?: att.employeeType
 
             when (type) {
@@ -900,7 +910,264 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    // Full JSON Export
+    fun relinkAttendanceRecords(onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val count = repository.relinkAttendanceRecordsByName()
+            onComplete?.invoke(count)
+        }
+    }
+
+    // Full Database Backup Export (Includes Employees, Contractors, Config, All Historical Daily Attendance & Verifications)
+    suspend fun exportCompleteDatabaseBackupJson(): String = withContext(Dispatchers.IO) {
+        val root = JSONObject()
+        root.put("version", 2)
+        root.put("backupType", "FULL_DATABASE_BACKUP")
+        root.put("appName", "BSPManpower")
+        root.put("backupTimestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).format(Date()))
+
+        val employees = repository.getAllEmployeesList()
+        val employeesArray = JSONArray()
+        employees.forEach { emp ->
+            val obj = JSONObject().apply {
+                put("id", emp.id)
+                put("name", emp.name)
+                put("type", emp.type)
+                put("status", emp.status)
+                put("dateAdded", emp.dateAdded)
+                put("permanentDepartment", emp.permanentDepartment)
+                put("designation", emp.designation)
+                if (emp.contractorId != null) put("contractorId", emp.contractorId)
+                put("contractorName", emp.contractorName)
+                put("defaultWorkRole", emp.defaultWorkRole)
+                put("defaultUnit", emp.defaultUnit)
+                put("defaultShift", emp.defaultShift)
+                put("permanentRemarks", emp.permanentRemarks)
+                put("customFieldsJson", emp.customFieldsJson)
+            }
+            employeesArray.put(obj)
+        }
+        root.put("employees", employeesArray)
+
+        val contractors = repository.getAllContractorsList()
+        val contractorsArray = JSONArray()
+        contractors.forEach { c ->
+            val obj = JSONObject().apply {
+                put("id", c.id)
+                put("name", c.name)
+                put("contactPerson", c.contactPerson)
+                put("phone", c.phone)
+                put("notes", c.notes)
+            }
+            contractorsArray.put(obj)
+        }
+        root.put("contractors", contractorsArray)
+
+        val configItems = repository.getAllConfigItemsList()
+        val configArray = JSONArray()
+        configItems.forEach { cfg ->
+            val obj = JSONObject().apply {
+                put("id", cfg.id)
+                put("category", cfg.category)
+                put("name", cfg.name)
+                put("extraType", cfg.extraType)
+            }
+            configArray.put(obj)
+        }
+        root.put("configItems", configArray)
+
+        val attendances = repository.getAllAttendanceList()
+        val attendanceArray = JSONArray()
+        attendances.forEach { att ->
+            val obj = JSONObject().apply {
+                put("id", att.id)
+                put("date", att.date)
+                put("employeeId", att.employeeId)
+                put("employeeName", att.employeeName)
+                put("employeeType", att.employeeType)
+                put("isPresent", att.isPresent)
+                put("dayDepartment", att.dayDepartment)
+                put("dayWorkRole", att.dayWorkRole)
+                put("dayContractorName", att.dayContractorName)
+                put("dayUnit", att.dayUnit)
+                put("dayShift", att.dayShift)
+                put("attendanceTime", att.attendanceTime)
+                put("attendanceTimestamp", att.attendanceTimestamp)
+                put("dayRemarks", att.dayRemarks)
+                put("updatedAt", att.updatedAt)
+            }
+            attendanceArray.put(obj)
+        }
+        root.put("dailyAttendance", attendanceArray)
+
+        val verifications = repository.getAllVerificationsList()
+        val verificationsArray = JSONArray()
+        verifications.forEach { v ->
+            val obj = JSONObject().apply {
+                put("id", v.id)
+                put("date", v.date)
+                put("departmentName", v.departmentName)
+                put("isVerified", v.isVerified)
+                if (v.verifiedByStaffId != null) put("verifiedByStaffId", v.verifiedByStaffId)
+                put("verifiedByStaffName", v.verifiedByStaffName)
+                put("verifiedAtTime", v.verifiedAtTime)
+                put("remarks", v.remarks)
+            }
+            verificationsArray.put(obj)
+        }
+        root.put("departmentVerifications", verificationsArray)
+
+        root.toString(2)
+    }
+
+    // Full Database Restore (Disaster Recovery)
+    suspend fun restoreCompleteDatabaseBackupJson(jsonStr: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val root = JSONObject(jsonStr)
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
+            var contractorsList: List<Contractor>? = null
+            var configItemsList: List<ConfigItem>? = null
+            var employeesList: List<Employee>? = null
+            var attendancesList: List<DailyAttendance>? = null
+            var verificationsList: List<DepartmentVerification>? = null
+
+            // Contractors
+            if (root.has("contractors")) {
+                val arr = root.getJSONArray("contractors")
+                val list = mutableListOf<Contractor>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    list.add(
+                        Contractor(
+                            id = obj.optLong("id", 0L),
+                            name = obj.optString("name", "Contractor"),
+                            contactPerson = obj.optString("contactPerson", ""),
+                            phone = obj.optString("phone", ""),
+                            notes = obj.optString("notes", "")
+                        )
+                    )
+                }
+                contractorsList = list
+            }
+
+            // Config Items
+            if (root.has("configItems")) {
+                val arr = root.getJSONArray("configItems")
+                val list = mutableListOf<ConfigItem>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    list.add(
+                        ConfigItem(
+                            id = obj.optLong("id", 0L),
+                            category = obj.optString("category", "DEPARTMENT"),
+                            name = obj.optString("name", ""),
+                            extraType = obj.optString("extraType", "")
+                        )
+                    )
+                }
+                configItemsList = list
+            }
+
+            // Employees
+            if (root.has("employees")) {
+                val arr = root.getJSONArray("employees")
+                val list = mutableListOf<Employee>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val empType = obj.optString("type", EmployeeTypes.LABOUR)
+                    list.add(
+                        Employee(
+                            id = obj.optLong("id", 0L),
+                            name = obj.optString("name", "Unnamed"),
+                            type = empType,
+                            status = obj.optString("status", EmployeeStatuses.ACTIVE),
+                            dateAdded = obj.optString("dateAdded", todayStr),
+                            permanentDepartment = obj.optString("permanentDepartment", "Welding Shop"),
+                            designation = if (empType == EmployeeTypes.STAFF) obj.optString("designation", "") else "",
+                            contractorId = if (obj.has("contractorId") && !obj.isNull("contractorId")) obj.optLong("contractorId") else null,
+                            contractorName = if (empType == EmployeeTypes.STAFF) "" else obj.optString("contractorName", ""),
+                            defaultWorkRole = if (empType != EmployeeTypes.STAFF) obj.optString("defaultWorkRole", "Helper") else "",
+                            defaultUnit = obj.optString("defaultUnit", "Unit I"),
+                            defaultShift = obj.optString("defaultShift", "Shift A"),
+                            permanentRemarks = obj.optString("permanentRemarks", ""),
+                            customFieldsJson = obj.optString("customFieldsJson", "{}")
+                        )
+                    )
+                }
+                employeesList = list
+            }
+
+            // Daily Attendance
+            if (root.has("dailyAttendance")) {
+                val arr = root.getJSONArray("dailyAttendance")
+                val list = mutableListOf<DailyAttendance>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    list.add(
+                        DailyAttendance(
+                            id = obj.optLong("id", 0L),
+                            date = obj.optString("date", todayStr),
+                            employeeId = obj.optLong("employeeId", 0L),
+                            employeeName = obj.optString("employeeName", ""),
+                            employeeType = obj.optString("employeeType", EmployeeTypes.LABOUR),
+                            isPresent = obj.optBoolean("isPresent", false),
+                            dayDepartment = obj.optString("dayDepartment", ""),
+                            dayWorkRole = obj.optString("dayWorkRole", ""),
+                            dayContractorName = obj.optString("dayContractorName", ""),
+                            dayUnit = obj.optString("dayUnit", ""),
+                            dayShift = obj.optString("dayShift", ""),
+                            attendanceTime = obj.optString("attendanceTime", ""),
+                            attendanceTimestamp = obj.optLong("attendanceTimestamp", 0L),
+                            dayRemarks = obj.optString("dayRemarks", ""),
+                            updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                        )
+                    )
+                }
+                attendancesList = list
+            }
+
+            // Department Verifications
+            if (root.has("departmentVerifications")) {
+                val arr = root.getJSONArray("departmentVerifications")
+                val list = mutableListOf<DepartmentVerification>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    list.add(
+                        DepartmentVerification(
+                            id = obj.optLong("id", 0L),
+                            date = obj.optString("date", todayStr),
+                            departmentName = obj.optString("departmentName", ""),
+                            isVerified = obj.optBoolean("isVerified", false),
+                            verifiedByStaffId = if (obj.has("verifiedByStaffId") && !obj.isNull("verifiedByStaffId")) obj.optLong("verifiedByStaffId") else null,
+                            verifiedByStaffName = obj.optString("verifiedByStaffName", ""),
+                            verifiedAtTime = obj.optString("verifiedAtTime", ""),
+                            remarks = obj.optString("remarks", "")
+                        )
+                    )
+                }
+                verificationsList = list
+            }
+
+            if (attendancesList != null || verificationsList != null) {
+                // Full database disaster recovery restore
+                repository.restoreFullDatabase(
+                    employees = employeesList,
+                    contractors = contractorsList,
+                    configItems = configItemsList,
+                    attendances = attendancesList,
+                    verifications = verificationsList
+                )
+            } else {
+                // Legacy roster / master data import (non-destructive upsert for employees)
+                repository.replaceAllMasterData(employeesList, contractorsList, configItemsList)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    // Full JSON Export (Rooster / Master Data only)
     fun exportAllDataJson(): String {
         val root = JSONObject()
         val employeesArray = JSONArray()
@@ -950,84 +1217,12 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         return root.toString(2)
     }
 
-    // Full JSON Import
+    // Full JSON Import (Handles both full database backups and master data files)
     fun importAllDataJson(jsonStr: String): Boolean {
-        return try {
-            val root = JSONObject(jsonStr)
-            viewModelScope.launch {
-                var contractorsList: List<Contractor>? = null
-                var configItemsList: List<ConfigItem>? = null
-                var employeesList: List<Employee>? = null
-
-                // Import contractors
-                if (root.has("contractors")) {
-                    val arr = root.getJSONArray("contractors")
-                    val list = mutableListOf<Contractor>()
-                    for (i in 0 until arr.length()) {
-                        val obj = arr.getJSONObject(i)
-                        list.add(
-                            Contractor(
-                                name = obj.optString("name", "Contractor"),
-                                contactPerson = obj.optString("contactPerson", ""),
-                                phone = obj.optString("phone", ""),
-                                notes = obj.optString("notes", "")
-                            )
-                        )
-                    }
-                    contractorsList = list
-                }
-
-                // Import config items
-                if (root.has("configItems")) {
-                    val arr = root.getJSONArray("configItems")
-                    val list = mutableListOf<ConfigItem>()
-                    for (i in 0 until arr.length()) {
-                        val obj = arr.getJSONObject(i)
-                        list.add(
-                            ConfigItem(
-                                category = obj.optString("category", "DEPARTMENT"),
-                                name = obj.optString("name", ""),
-                                extraType = obj.optString("extraType", "")
-                            )
-                        )
-                    }
-                    configItemsList = list
-                }
-
-                // Import employees
-                if (root.has("employees")) {
-                    val arr = root.getJSONArray("employees")
-                    val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                    val list = mutableListOf<Employee>()
-                    for (i in 0 until arr.length()) {
-                        val obj = arr.getJSONObject(i)
-                        val empType = obj.optString("type", EmployeeTypes.LABOUR)
-                        list.add(
-                            Employee(
-                                name = obj.optString("name", "Unnamed"),
-                                type = empType,
-                                status = obj.optString("status", EmployeeStatuses.ACTIVE),
-                                dateAdded = obj.optString("dateAdded", todayStr),
-                                permanentDepartment = obj.optString("permanentDepartment", "Welding Shop"),
-                                designation = if (empType == EmployeeTypes.STAFF) obj.optString("designation", "") else "",
-                                contractorName = if (empType == EmployeeTypes.STAFF) "" else obj.optString("contractorName", ""),
-                                defaultWorkRole = if (empType != EmployeeTypes.STAFF) obj.optString("defaultWorkRole", "Helper") else "",
-                                defaultUnit = obj.optString("defaultUnit", "Unit I"),
-                                defaultShift = obj.optString("defaultShift", "Shift A"),
-                                permanentRemarks = obj.optString("permanentRemarks", "")
-                            )
-                        )
-                    }
-                    employeesList = list
-                }
-
-                // User requirement: "Importing will not merge. only replace."
-                repository.replaceAllMasterData(employeesList, contractorsList, configItemsList)
-            }
-            true
-        } catch (_: Exception) {
-            false
+        viewModelScope.launch {
+            restoreCompleteDatabaseBackupJson(jsonStr)
         }
+        return true
     }
 
     // --- MASTER DATA MANAGEMENT ---
@@ -1084,18 +1279,19 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         val activeLabour = allEmps.filter { it.type != EmployeeTypes.STAFF }
 
         val attendances = _attendanceStream.value
-        val attMap = attendances.associateBy { it.employeeId }
+        val attById = attendances.associateBy { it.employeeId }
+        val attByName = attendances.associateBy { it.employeeName.trim().lowercase() }
 
-        val staffPresentCount = activeStaff.count { attMap[it.id]?.isPresent == true }
-        val labourPresentCount = activeLabour.count { attMap[it.id]?.isPresent == true }
+        val staffPresentCount = activeStaff.count { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent == true }
+        val labourPresentCount = activeLabour.count { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent == true }
         val totalOnFloor = staffPresentCount + labourPresentCount
 
-        val presentLabourers = activeLabour.filter { attMap[it.id]?.isPresent == true }
+        val presentLabourers = activeLabour.filter { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent == true }
 
         // Contractor breakdown
         val contractorCounts = mutableMapOf<String, Int>()
         presentLabourers.forEach { emp ->
-            val att = attMap[emp.id]
+            val att = attById[emp.id] ?: attByName[emp.name.trim().lowercase()]
             val contractor = att?.dayContractorName?.ifBlank { null }
                 ?: emp.contractorName.ifBlank { null }
                 ?: "Direct / In-house"
@@ -1105,7 +1301,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         // Work assigned breakdown (labor present)
         val roleCounts = mutableMapOf<String, Int>()
         presentLabourers.forEach { emp ->
-            val att = attMap[emp.id]
+            val att = attById[emp.id] ?: attByName[emp.name.trim().lowercase()]
             val role = att?.dayWorkRole?.ifBlank { null }
                 ?: emp.defaultWorkRole.ifBlank { null }
             if (!role.isNullOrBlank()) {
@@ -1116,9 +1312,9 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         // Shift split (present)
         var dayShiftCount = 0
         var nightShiftCount = 0
-        val allPresentWorkers = allEmps.filter { attMap[it.id]?.isPresent == true }
+        val allPresentWorkers = allEmps.filter { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent == true }
         allPresentWorkers.forEach { emp ->
-            val att = attMap[emp.id]
+            val att = attById[emp.id] ?: attByName[emp.name.trim().lowercase()]
             val shift = att?.dayShift?.ifBlank { null } ?: emp.defaultShift.ifBlank { "Shift A" }
             val s = shift.lowercase()
             if (s.contains("night") || s.contains("shift b") || s.contains("shift c") || s.contains("2nd") || s.contains("3rd")) {
@@ -1130,7 +1326,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
         // Absent staff
         val absentStaffNames = activeStaff
-            .filter { attMap[it.id]?.isPresent != true }
+            .filter { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent != true }
             .map { it.name }
         val absentStaffStr = if (absentStaffNames.isEmpty()) "None" else absentStaffNames.joinToString(", ")
 

@@ -1,8 +1,16 @@
 package com.gratus.bsputility.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.res.Configuration
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,19 +24,24 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -45,10 +58,12 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +81,11 @@ import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.theme.IndustrialAmber600
 import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
+import com.gratus.bsputility.utils.StorageHelper
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 fun MasterDataScreen(
@@ -99,6 +119,13 @@ fun MasterDataScreen(
                 Toast.makeText(context, "Transferred defaults for $count labourers into rooster library", Toast.LENGTH_LONG).show()
             }
         },
+        onRelinkAttendanceHistory = {
+            viewModel.relinkAttendanceRecords { count ->
+                Toast.makeText(context, "Re-linked and verified $count past attendance records by worker name", Toast.LENGTH_LONG).show()
+            }
+        },
+        onExportFullBackup = { viewModel.exportCompleteDatabaseBackupJson() },
+        onRestoreFullBackup = { viewModel.restoreCompleteDatabaseBackupJson(it) },
         onAddContractor = { viewModel.addContractor(it) },
         onUpdateContractor = { viewModel.updateContractor(it) },
         onDeleteContractor = {
@@ -125,6 +152,9 @@ fun MasterDataScreenContent(
     onClearStaffContractors: () -> Unit = {},
     onMigrateTimeData: () -> Unit = {},
     onSyncLabourDefaults: () -> Unit = {},
+    onRelinkAttendanceHistory: () -> Unit = {},
+    onExportFullBackup: (suspend () -> String)? = null,
+    onRestoreFullBackup: (suspend (String) -> Boolean)? = null,
     onAddContractor: (Contractor) -> Unit,
     onUpdateContractor: (Contractor) -> Unit,
     onDeleteContractor: (Contractor) -> Unit,
@@ -143,6 +173,9 @@ fun MasterDataScreenContent(
     var showAddConfigDialog by remember { mutableStateOf(false) }
     var editingConfigItem by remember { mutableStateOf<ConfigItem?>(null) }
     var newConfigCategory by remember { mutableStateOf("DEPARTMENT") }
+    var showRestoreFullBackupDialog by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     Box(
         modifier = modifier.fillMaxSize()
@@ -335,6 +368,75 @@ fun MasterDataScreenContent(
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
+                                        Icons.Default.Storage,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                    Text(
+                                        text = "Full Database Backup & Disaster Recovery",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
+                                    )
+                                }
+                                Text(
+                                    text = "Export an all-inclusive snapshot of all employee records, contractors, master categories, daily attendance across all dates, and department verifications into a single JSON file. Restore to recover complete system state in case of data loss.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                                )
+
+                                Button(
+                                    onClick = {
+                                        if (onExportFullBackup != null) {
+                                            coroutineScope.launch {
+                                                val json = onExportFullBackup()
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                clipboard.setPrimaryClip(ClipData.newPlainText("BSP Manpower Full Database Backup", json))
+                                                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                                                val fileName = "BSP_Full_Database_Backup_$timestamp.json"
+                                                val res = StorageHelper.exportToDocuments(context, fileName, "application/json", json)
+                                                val msg = if (res.success) "Full backup saved to ${res.filePathOrUri} & copied to clipboard!" else "Backup JSON copied to clipboard!"
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("btn_export_full_database_backup")
+                                ) {
+                                    Icon(Icons.Default.Backup, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Export Complete Database Backup (.JSON)")
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedButton(
+                                    onClick = {
+                                        showRestoreFullBackupDialog = true
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("btn_restore_full_database_backup")
+                                ) {
+                                    Icon(Icons.Default.CloudDownload, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Restore Database / Disaster Recovery")
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
                                         Icons.Default.Settings,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary,
@@ -393,6 +495,21 @@ fun MasterDataScreenContent(
                                 }
                                 Text(
                                     text = "Transfers allotted departments, roles, units, and shifts from daily attendance history back into labourer rooster records.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 12.dp)
+                                )
+
+                                OutlinedButton(
+                                    onClick = onRelinkAttendanceHistory,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("btn_relink_attendance_history")
+                                ) {
+                                    Text("Re-link Attendance History by Worker Name")
+                                }
+                                Text(
+                                    text = "Scans all historical daily attendance records and re-links them to current roster employee IDs based on worker names.",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(start = 4.dp, top = 2.dp)
@@ -560,6 +677,14 @@ fun MasterDataScreenContent(
                 showAddConfigDialog = false
                 editingConfigItem = null
             }
+        )
+    }
+
+    // Modal: Full Database Restore (Disaster Recovery)
+    if (showRestoreFullBackupDialog && onRestoreFullBackup != null) {
+        RestoreFullDatabaseDialog(
+            onRestore = onRestoreFullBackup,
+            onDismiss = { showRestoreFullBackupDialog = false }
         )
     }
 }
@@ -812,6 +937,123 @@ fun AddConfigDialog(
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun RestoreFullDatabaseDialog(
+    onRestore: suspend (String) -> Boolean,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var jsonInput by remember { mutableStateOf("") }
+    var isRestoring by remember { mutableStateOf(false) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val fileName = StorageHelper.getFileName(context, uri) ?: "backup file"
+            val text = StorageHelper.readTextFromUri(context, uri)
+            if (!text.isNullOrBlank()) {
+                jsonInput = text
+                Toast.makeText(context, "Loaded $fileName (${text.length} characters)", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Selected file is empty or could not be read", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!isRestoring) onDismiss() },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Restore Full Database", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Select a full database backup JSON file or paste backup contents below to recover workers, contractors, settings, and historical daily attendance records across all dates.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedButton(
+                    onClick = {
+                        filePickerLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Select Backup File (.json)")
+                }
+
+                Text(
+                    text = "Or paste JSON content directly:",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                OutlinedTextField(
+                    value = jsonInput,
+                    onValueChange = { jsonInput = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp),
+                    placeholder = { Text("{\n  \"backupType\": \"FULL_DATABASE_BACKUP\",\n  \"employees\": [...],\n  \"dailyAttendance\": [...]\n}") }
+                )
+
+                Text(
+                    text = "Warning: Restoring will overwrite existing master records and replace historical attendance records with those from the backup.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (jsonInput.isNotBlank()) {
+                        isRestoring = true
+                        coroutineScope.launch {
+                            val success = onRestore(jsonInput)
+                            isRestoring = false
+                            if (success) {
+                                Toast.makeText(context, "Database and attendance history restored successfully!", Toast.LENGTH_LONG).show()
+                                onDismiss()
+                            } else {
+                                Toast.makeText(context, "Failed to parse or restore database JSON!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } else {
+                        Toast.makeText(context, "Please choose a backup file or paste JSON first", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                enabled = !isRestoring && jsonInput.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text(if (isRestoring) "Restoring..." else "Restore Full Database")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isRestoring
+            ) {
                 Text("Cancel")
             }
         }

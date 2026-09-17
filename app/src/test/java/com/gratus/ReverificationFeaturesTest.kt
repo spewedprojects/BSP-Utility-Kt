@@ -1,6 +1,7 @@
 package com.gratus
 
 import com.gratus.bsputility.data.models.ConfigItem
+import com.gratus.bsputility.data.models.DailyAttendance
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
@@ -1480,7 +1481,256 @@ class ReverificationFeaturesTest {
         assertEquals("Unit I", unit) // Modified unit reflected
         assertEquals("Night Shift", shift) // Modified shift reflected
     }
+
+    @Test
+    fun `relinkAttendanceRecordsByName restores past attendance records after CSV import renumbers IDs`() {
+        // Suppose past attendance records were recorded under old IDs (e.g. 1L, 2L)
+        val pastAttendanceRecords = listOf(
+            DailyAttendance(
+                id = 101L,
+                date = "2026-09-12",
+                employeeId = 1L, // Old ID
+                employeeName = "Ramesh Pawar",
+                employeeType = EmployeeTypes.LABOUR,
+                isPresent = true,
+                dayDepartment = "Welding Shop",
+                dayWorkRole = "Welder",
+                dayContractorName = "Apex Facilities",
+                dayUnit = "Unit I",
+                dayShift = "Shift A"
+            ),
+            DailyAttendance(
+                id = 102L,
+                date = "2026-09-13",
+                employeeId = 2L, // Old ID
+                employeeName = "Suresh Jadhav",
+                employeeType = EmployeeTypes.LABOUR,
+                isPresent = true,
+                dayDepartment = "Laser Cutting",
+                dayWorkRole = "Laser Operator",
+                dayContractorName = "Apex Facilities",
+                dayUnit = "Unit II",
+                dayShift = "Night Shift"
+            )
+        )
+
+        // Now, new CSV import gave them new IDs (e.g. 51L, 52L)
+        val currentEmployeesInRoster = listOf(
+            Employee(
+                id = 51L, // New ID generated after import
+                name = "Ramesh Pawar",
+                type = EmployeeTypes.LABOUR,
+                permanentDepartment = "Welding Shop",
+                defaultWorkRole = "Welder",
+                dateAdded = "2026-09-10"
+            ),
+            Employee(
+                id = 52L, // New ID generated after import
+                name = "Suresh Jadhav",
+                type = EmployeeTypes.LABOUR,
+                permanentDepartment = "Laser Cutting",
+                defaultWorkRole = "Laser Operator",
+                dateAdded = "2026-09-10"
+            )
+        )
+
+        // Relinking logic
+        val empByName = currentEmployeesInRoster.associateBy { it.name.trim().lowercase() }
+        val healedAttendance = pastAttendanceRecords.map { att ->
+            val matched = empByName[att.employeeName.trim().lowercase()]
+            if (matched != null) {
+                att.copy(employeeId = matched.id, employeeType = matched.type)
+            } else att
+        }
+
+        // Verify that attendance records are re-linked to the new IDs
+        assertEquals(2, healedAttendance.size)
+        assertEquals(51L, healedAttendance[0].employeeId)
+        assertEquals("Ramesh Pawar", healedAttendance[0].employeeName)
+        assertEquals(52L, healedAttendance[1].employeeId)
+        assertEquals("Suresh Jadhav", healedAttendance[1].employeeName)
+
+        // Test fallback lookup by name before batch re-link
+        val attendanceById = pastAttendanceRecords.associateBy { it.employeeId }
+        val attendanceByName = pastAttendanceRecords.associateBy { it.employeeName.trim().lowercase() }
+
+        currentEmployeesInRoster.forEach { emp ->
+            val resolvedAtt = attendanceById[emp.id] ?: attendanceByName[emp.name.trim().lowercase()]
+            assertTrue(resolvedAtt != null)
+            assertEquals(emp.name, resolvedAtt!!.employeeName)
+            assertTrue(resolvedAtt.isPresent)
+        }
+    }
+
+    @Test
+    fun `in-place roster upsert preserves existing employee database IDs and soft-archives missing workers as OUT`() {
+        val existingEmployees = listOf(
+            Employee(id = 10L, name = "Ramesh Pawar", type = EmployeeTypes.LABOUR, status = EmployeeStatuses.ACTIVE, dateAdded = "2026-09-01", contractorName = "Jai Shree", defaultWorkRole = "Helper"),
+            Employee(id = 20L, name = "Suresh Jadhav", type = EmployeeTypes.LABOUR, status = EmployeeStatuses.ACTIVE, dateAdded = "2026-09-01", contractorName = "Apex Facilities", defaultWorkRole = "Operator"),
+            Employee(id = 30L, name = "Mahesh Shinde", type = EmployeeTypes.LABOUR, status = EmployeeStatuses.ACTIVE, dateAdded = "2026-09-01", contractorName = "Jai Shree", defaultWorkRole = "Fitter")
+        )
+
+        // Incoming CSV has Ramesh with updated unit/shift, new worker Ganesh, but omits Mahesh
+        val incomingRoster = listOf(
+            Employee(id = 0L, name = "Ramesh Pawar", type = EmployeeTypes.LABOUR, status = EmployeeStatuses.ACTIVE, dateAdded = "2026-09-18", contractorName = "Jai Shree", defaultWorkRole = "Helper", defaultUnit = "Unit II", defaultShift = "Shift B"),
+            Employee(id = 20L, name = "Suresh Jadhav", type = EmployeeTypes.LABOUR, status = EmployeeStatuses.ACTIVE, dateAdded = "2026-09-01", contractorName = "Apex Facilities", defaultWorkRole = "Operator"),
+            Employee(id = 0L, name = "Ganesh Patil", type = EmployeeTypes.LABOUR, status = EmployeeStatuses.ACTIVE, dateAdded = "2026-09-18", contractorName = "Jai Shree", defaultWorkRole = "Welder")
+        )
+
+        val existingById = existingEmployees.associateBy { it.id }
+        val existingByName = existingEmployees.associateBy { it.name.trim().lowercase() }
+
+        val toUpdate = mutableListOf<Employee>()
+        val toInsert = mutableListOf<Employee>()
+        val matchedIds = mutableSetOf<Long>()
+
+        for (imported in incomingRoster) {
+            val matched = (if (imported.id > 0) existingById[imported.id] else null) ?: existingByName[imported.name.trim().lowercase()]
+            if (matched != null) {
+                matchedIds.add(matched.id)
+                toUpdate.add(
+                    imported.copy(
+                        id = matched.id,
+                        dateAdded = matched.dateAdded // Preserves original joining date
+                    )
+                )
+            } else {
+                toInsert.add(imported.copy(id = 99L)) // Assigned new ID
+            }
+        }
+
+        val toArchive = existingEmployees.filter { it.id !in matchedIds }.map { it.copy(status = EmployeeStatuses.OUT) }
+
+        // Assertions
+        assertEquals(2, toUpdate.size)
+        val updatedRamesh = toUpdate.first { it.name == "Ramesh Pawar" }
+        assertEquals(10L, updatedRamesh.id) // ID is preserved!
+        assertEquals("2026-09-01", updatedRamesh.dateAdded) // Joining date is preserved!
+        assertEquals("Unit II", updatedRamesh.defaultUnit) // Updated default unit
+        assertEquals("Shift B", updatedRamesh.defaultShift) // Updated default shift
+
+        assertEquals(1, toInsert.size)
+        assertEquals("Ganesh Patil", toInsert[0].name)
+
+        assertEquals(1, toArchive.size)
+        val archivedMahesh = toArchive[0]
+        assertEquals(30L, archivedMahesh.id) // ID is retained!
+        assertEquals(EmployeeStatuses.OUT, archivedMahesh.status) // Soft-archived, NOT deleted!
+    }
+
+    @Test
+    fun `full database backup and restore disaster recovery JSON roundtrip preserves all tables and attendance across dates`() {
+        val contractors = listOf(
+            com.gratus.bsputility.data.models.Contractor(id = 1L, name = "Jai Shree Agency", contactPerson = "Mr. Sharma", phone = "9876543210", notes = "Provides helpers")
+        )
+        val configItems = listOf(
+            ConfigItem(id = 1L, category = "DEPARTMENT", name = "Welding Shop"),
+            ConfigItem(id = 2L, category = "LABOUR_ROLE", name = "Fitter", extraType = "Welding Shop")
+        )
+        val employees = listOf(
+            Employee(id = 1L, name = "Rajesh Kharat", type = EmployeeTypes.STAFF, status = EmployeeStatuses.ACTIVE, dateAdded = "2026-09-10", designation = "Supervisor"),
+            Employee(id = 2L, name = "Ramesh Pawar", type = EmployeeTypes.LABOUR, status = EmployeeStatuses.ACTIVE, dateAdded = "2026-09-10", contractorName = "Jai Shree Agency", defaultWorkRole = "Helper")
+        )
+        val dailyAttendances = listOf(
+            DailyAttendance(id = 101L, date = "2026-09-15", employeeId = 1L, employeeName = "Rajesh Kharat", employeeType = EmployeeTypes.STAFF, isPresent = true, attendanceTime = "08:30 AM"),
+            DailyAttendance(id = 102L, date = "2026-09-15", employeeId = 2L, employeeName = "Ramesh Pawar", employeeType = EmployeeTypes.LABOUR, isPresent = true, dayDepartment = "Welding Shop", dayWorkRole = "Helper"),
+            DailyAttendance(id = 103L, date = "2026-09-16", employeeId = 1L, employeeName = "Rajesh Kharat", employeeType = EmployeeTypes.STAFF, isPresent = false),
+            DailyAttendance(id = 104L, date = "2026-09-16", employeeId = 2L, employeeName = "Ramesh Pawar", employeeType = EmployeeTypes.LABOUR, isPresent = true, dayDepartment = "Welding Shop", dayWorkRole = "Fitter")
+        )
+        val verifications = listOf(
+            com.gratus.bsputility.data.models.DepartmentVerification(id = 201L, date = "2026-09-15", departmentName = "Welding Shop", isVerified = true, verifiedByStaffName = "Rajesh Kharat", verifiedAtTime = "09:00 AM")
+        )
+
+        // 1. Serialize to Full Database Backup JSON
+        val root = JSONObject().apply {
+            put("version", 2)
+            put("backupType", "FULL_DATABASE_BACKUP")
+            put("appName", "BSPManpower")
+            put("backupTimestamp", "2026-09-18T00:00:00")
+
+            val empArr = org.json.JSONArray()
+            employees.forEach { e ->
+                empArr.put(JSONObject().apply {
+                    put("id", e.id)
+                    put("name", e.name)
+                    put("type", e.type)
+                    put("status", e.status)
+                    put("dateAdded", e.dateAdded)
+                    put("designation", e.designation)
+                    put("contractorName", e.contractorName)
+                    put("defaultWorkRole", e.defaultWorkRole)
+                })
+            }
+            put("employees", empArr)
+
+            val attArr = org.json.JSONArray()
+            dailyAttendances.forEach { a ->
+                attArr.put(JSONObject().apply {
+                    put("id", a.id)
+                    put("date", a.date)
+                    put("employeeId", a.employeeId)
+                    put("employeeName", a.employeeName)
+                    put("employeeType", a.employeeType)
+                    put("isPresent", a.isPresent)
+                    put("dayDepartment", a.dayDepartment)
+                    put("dayWorkRole", a.dayWorkRole)
+                    put("attendanceTime", a.attendanceTime)
+                })
+            }
+            put("dailyAttendance", attArr)
+
+            val verArr = org.json.JSONArray()
+            verifications.forEach { v ->
+                verArr.put(JSONObject().apply {
+                    put("id", v.id)
+                    put("date", v.date)
+                    put("departmentName", v.departmentName)
+                    put("isVerified", v.isVerified)
+                    put("verifiedByStaffName", v.verifiedByStaffName)
+                    put("verifiedAtTime", v.verifiedAtTime)
+                })
+            }
+            put("departmentVerifications", verArr)
+        }
+
+        val jsonString = root.toString(2)
+        assertTrue(jsonString.contains("FULL_DATABASE_BACKUP"))
+        assertTrue(jsonString.contains("dailyAttendance"))
+
+        // 2. Deserialize / Disaster Recovery Parse
+        val parsedRoot = JSONObject(jsonString)
+        assertEquals("FULL_DATABASE_BACKUP", parsedRoot.getString("backupType"))
+
+        val restoredAttendances = mutableListOf<DailyAttendance>()
+        val parsedAttArr = parsedRoot.getJSONArray("dailyAttendance")
+        for (i in 0 until parsedAttArr.length()) {
+            val obj = parsedAttArr.getJSONObject(i)
+            restoredAttendances.add(
+                DailyAttendance(
+                    id = obj.getLong("id"),
+                    date = obj.getString("date"),
+                    employeeId = obj.getLong("employeeId"),
+                    employeeName = obj.getString("employeeName"),
+                    employeeType = obj.getString("employeeType"),
+                    isPresent = obj.getBoolean("isPresent"),
+                    dayDepartment = obj.optString("dayDepartment", ""),
+                    dayWorkRole = obj.optString("dayWorkRole", ""),
+                    attendanceTime = obj.optString("attendanceTime", "")
+                )
+            )
+        }
+
+        assertEquals(4, restoredAttendances.size)
+        // Verify multiple dates are fully intact
+        assertEquals(2, restoredAttendances.count { it.date == "2026-09-15" })
+        assertEquals(2, restoredAttendances.count { it.date == "2026-09-16" })
+        val sep16Labourer = restoredAttendances.first { it.date == "2026-09-16" && it.employeeType == EmployeeTypes.LABOUR }
+        assertEquals("Ramesh Pawar", sep16Labourer.employeeName)
+        assertEquals("Fitter", sep16Labourer.dayWorkRole)
+        assertTrue(sep16Labourer.isPresent)
+    }
 }
+
 
 
 

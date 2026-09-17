@@ -6,6 +6,7 @@ import com.gratus.bsputility.data.models.Contractor
 import com.gratus.bsputility.data.models.DailyAttendance
 import com.gratus.bsputility.data.models.DepartmentVerification
 import com.gratus.bsputility.data.models.Employee
+import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
@@ -144,9 +145,99 @@ class ManpowerRepository(private val dao: EmployeeDao) {
         dao.deleteConfigItem(item)
     }
 
+    suspend fun relinkAttendanceRecordsByName(): Int {
+        val allEmps = dao.getAllEmployeesList()
+        if (allEmps.isEmpty()) return 0
+        val empByName = allEmps.associateBy { it.name.trim().lowercase() }
+        val allAttendance = dao.getAllAttendanceRecords()
+        if (allAttendance.isEmpty()) return 0
+
+        val toUpdate = mutableListOf<DailyAttendance>()
+        for (att in allAttendance) {
+            val matched = empByName[att.employeeName.trim().lowercase()]
+            if (matched != null && (att.employeeId != matched.id || att.employeeType != matched.type)) {
+                toUpdate.add(
+                    att.copy(
+                        employeeId = matched.id,
+                        employeeType = matched.type
+                    )
+                )
+            }
+        }
+        if (toUpdate.isNotEmpty()) {
+            dao.updateDailyAttendanceBatch(toUpdate)
+        }
+        return toUpdate.size
+    }
+
+    suspend fun syncEmployeesRosterUpsert(importedEmployees: List<Employee>): Int {
+        val existingEmployees = dao.getAllEmployeesList()
+        val existingById = existingEmployees.associateBy { it.id }
+        val existingByComposite = existingEmployees.associateBy { "${it.name.trim().lowercase()}|${it.contractorName.trim().lowercase()}" }
+        val existingByName = existingEmployees.associateBy { it.name.trim().lowercase() }
+
+        val toInsert = mutableListOf<Employee>()
+        val toUpdate = mutableListOf<Employee>()
+        val matchedExistingIds = mutableSetOf<Long>()
+
+        for (imported in importedEmployees) {
+            val matched = (if (imported.id > 0) existingById[imported.id] else null)
+                ?: existingByComposite["${imported.name.trim().lowercase()}|${imported.contractorName.trim().lowercase()}"]
+                ?: existingByName[imported.name.trim().lowercase()]
+
+            if (matched != null) {
+                matchedExistingIds.add(matched.id)
+                toUpdate.add(
+                    imported.copy(
+                        id = matched.id,
+                        dateAdded = if (imported.dateAdded.isNotBlank()) imported.dateAdded else matched.dateAdded,
+                        status = if (imported.status.isNotBlank()) imported.status else matched.status,
+                        contractorId = imported.contractorId ?: matched.contractorId
+                    )
+                )
+            } else {
+                toInsert.add(imported.copy(id = 0L))
+            }
+        }
+
+        // Archive (soft-delete) existing workers that were omitted from incoming roster
+        val toArchive = existingEmployees.filter { it.id !in matchedExistingIds && it.status != EmployeeStatuses.OUT }.map {
+            it.copy(status = EmployeeStatuses.OUT)
+        }
+
+        if (toUpdate.isNotEmpty() || toArchive.isNotEmpty()) {
+            dao.updateEmployees(toUpdate + toArchive)
+        }
+        if (toInsert.isNotEmpty()) {
+            dao.insertEmployees(toInsert)
+        }
+
+        relinkAttendanceRecordsByName()
+        return toUpdate.size + toInsert.size
+    }
+
+    suspend fun getAllEmployeesList(): List<Employee> {
+        return dao.getAllEmployeesList()
+    }
+
+    suspend fun getAllContractorsList(): List<Contractor> {
+        return dao.getAllContractorsList()
+    }
+
+    suspend fun getAllConfigItemsList(): List<ConfigItem> {
+        return dao.getAllConfigItemsList()
+    }
+
+    suspend fun getAllAttendanceList(): List<DailyAttendance> {
+        return dao.getAllAttendanceRecords()
+    }
+
+    suspend fun getAllVerificationsList(): List<DepartmentVerification> {
+        return dao.getAllVerificationsList()
+    }
+
     suspend fun replaceEmployees(employees: List<Employee>) {
-        dao.deleteAllEmployees()
-        dao.insertEmployees(employees)
+        syncEmployeesRosterUpsert(employees)
     }
 
     suspend fun replaceAllMasterData(
@@ -163,9 +254,38 @@ class ManpowerRepository(private val dao: EmployeeDao) {
             dao.insertConfigItems(configItems)
         }
         if (employees != null) {
+            syncEmployeesRosterUpsert(employees)
+        }
+    }
+
+    suspend fun restoreFullDatabase(
+        employees: List<Employee>?,
+        contractors: List<Contractor>?,
+        configItems: List<ConfigItem>?,
+        attendances: List<DailyAttendance>?,
+        verifications: List<DepartmentVerification>?
+    ) {
+        if (contractors != null) {
+            dao.deleteAllContractors()
+            dao.insertContractors(contractors)
+        }
+        if (configItems != null) {
+            dao.deleteAllConfigItems()
+            dao.insertConfigItems(configItems)
+        }
+        if (employees != null) {
             dao.deleteAllEmployees()
             dao.insertEmployees(employees)
         }
+        if (attendances != null) {
+            dao.deleteAllDailyAttendance()
+            dao.insertAttendanceBatch(attendances)
+        }
+        if (verifications != null) {
+            dao.deleteAllDepartmentVerifications()
+            dao.insertVerificationsBatch(verifications)
+        }
+        relinkAttendanceRecordsByName()
     }
 
     suspend fun getAttendanceListForDate(date: String): List<DailyAttendance> {
