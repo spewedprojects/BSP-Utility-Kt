@@ -291,11 +291,14 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         _attendanceStream
     ) { employees, attendances ->
         val attendanceById = attendances.associateBy { it.employeeId }
+        val attendanceByCode = attendances.filter { it.employeeCode.isNotBlank() }.associateBy { it.employeeCode.trim().lowercase() }
         val attendanceByName = attendances.associateBy { it.employeeName.trim().lowercase() }
         val activeEmployees = employees.filter { it.status != EmployeeStatuses.OUT }
 
         activeEmployees.map { emp ->
-            val att = attendanceById[emp.id] ?: attendanceByName[emp.name.trim().lowercase()]
+            val att = attendanceById[emp.id]
+                ?: (if (emp.empCode.isNotBlank()) attendanceByCode[emp.empCode.trim().lowercase()] else null)
+                ?: attendanceByName[emp.name.trim().lowercase()]
             EmployeeAttendanceItem(
                 employee = emp,
                 isPresent = att?.isPresent ?: false,
@@ -324,6 +327,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         items.filter { item ->
             val matchesQuery = query.isBlank() ||
                 item.employee.name.contains(query, ignoreCase = true) ||
+                item.employee.empCode.contains(query, ignoreCase = true) ||
                 item.effectiveDepartment.contains(query, ignoreCase = true) ||
                 item.effectiveWorkRole.contains(query, ignoreCase = true) ||
                 item.effectiveContractor.contains(query, ignoreCase = true)
@@ -466,6 +470,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 id = item.attendanceId ?: 0,
                 date = _selectedDate.value,
                 employeeId = item.employee.id,
+                employeeCode = item.employee.empCode,
                 employeeName = item.employee.name,
                 employeeType = item.employee.type,
                 isPresent = newPresence,
@@ -499,6 +504,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 id = existing?.id ?: 0,
                 date = _selectedDate.value,
                 employeeId = employee.id,
+                employeeCode = employee.empCode,
                 employeeName = employee.name,
                 employeeType = employee.type,
                 isPresent = isPresent,
@@ -547,6 +553,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 id = existing?.id ?: 0,
                 date = _selectedDate.value,
                 employeeId = employee.id,
+                employeeCode = employee.empCode,
                 employeeName = employee.name,
                 employeeType = employee.type,
                 isPresent = isPresent,
@@ -584,6 +591,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                             id = att?.id ?: 0,
                             date = _selectedDate.value,
                             employeeId = emp.id,
+                            employeeCode = emp.empCode,
                             employeeName = emp.name,
                             employeeType = emp.type,
                             isPresent = false,
@@ -613,6 +621,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                         id = att?.id ?: 0,
                         date = _selectedDate.value,
                         employeeId = emp.id,
+                        employeeCode = emp.empCode,
                         employeeName = emp.name,
                         employeeType = emp.type,
                         isPresent = true,
@@ -760,7 +769,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         val firstLineCols = parseCsvLine(lines[0])
         val hasHeader = firstLineCols.any { col ->
             val c = col.lowercase().replace(" ", "").replace("_", "")
-            c in listOf("name", "employeename", "workername", "department", "contractor", "type", "status", "role", "designation")
+            c in listOf("name", "employeename", "workername", "department", "contractor", "type", "status", "role", "designation", "employeecode", "empcode", "code", "esslid", "biometricid")
         }
 
         val headerIndexMap = if (hasHeader) {
@@ -779,6 +788,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 }
                 return ""
             } else {
+                if (fallbackIndex < 0) return ""
                 return cols.getOrNull(fallbackIndex)?.removeSurrounding("\"")?.trim() ?: ""
             }
         }
@@ -790,12 +800,27 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             val cols = parseCsvLine(lines[i])
             if (cols.isEmpty()) continue
 
+            // 0. Employee Code
+            val empCode = getColValue(
+                cols,
+                listOf("employeecode", "empcode", "code", "esslid", "biometricid", "esslcode", "staffcode", "laborcode", "labourcode"),
+                if (cols.size >= 12) 0 else -1
+            )
+
             // 1. Name
-            val name = getColValue(cols, listOf("name", "employeename", "workername", "fullname", "empname"), 0)
+            val name = getColValue(
+                cols,
+                listOf("name", "employeename", "workername", "fullname", "empname"),
+                if (cols.size >= 12) 1 else 0
+            )
             if (name.isBlank()) continue
 
             // 2. Type
-            val rawType = getColValue(cols, listOf("type", "employeetype", "category", "emptype"), 1)
+            val rawType = getColValue(
+                cols,
+                listOf("type", "employeetype", "category", "emptype"),
+                if (cols.size >= 12) 2 else 1
+            )
             val type = when {
                 rawType.contains("staff", ignoreCase = true) -> EmployeeTypes.STAFF
                 rawType.contains("housekeep", ignoreCase = true) -> EmployeeTypes.HOUSEKEEPING
@@ -804,7 +829,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             }
 
             // 3. Status
-            val rawStatus = getColValue(cols, listOf("status", "employeestatus", "empstatus"), 2)
+            val rawStatus = getColValue(
+                cols,
+                listOf("status", "employeestatus", "empstatus"),
+                if (cols.size >= 12) 3 else 2
+            )
             val status = when {
                 rawStatus.contains("out", ignoreCase = true) -> EmployeeStatuses.OUT
                 rawStatus.contains("debar", ignoreCase = true) -> EmployeeStatuses.DEBARRED
@@ -813,57 +842,66 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             }
 
             // 4. Department
-            val dept = getColValue(cols, listOf("department", "dept", "permanentdepartment", "permdept"), 3).ifBlank { "Welding Shop" }
+            val dept = getColValue(
+                cols,
+                listOf("department", "dept", "permanentdepartment", "permdept"),
+                if (cols.size >= 12) 4 else 3
+            ).ifBlank { "Welding Shop" }
 
             // 5. Designation (for Staff)
-            val designation = getColValue(cols, listOf("designation", "title", "jobtitle", "staffdesignation"), 4)
+            val designation = getColValue(
+                cols,
+                listOf("designation", "title", "jobtitle", "staffdesignation"),
+                if (cols.size >= 12) 5 else 4
+            )
 
             // 6. Contractor (for Labour)
             val contractor = getColValue(
                 cols,
                 listOf("contractor", "contractorname", "agency", "vendor", "contractoragency"),
-                if (hasHeader) 5 else (if (cols.size <= 8) 4 else 5)
+                if (hasHeader) 5 else (if (cols.size >= 12) 6 else (if (cols.size <= 8) 4 else 5))
             )
 
             // 7. Default Role (for Labour)
             val role = getColValue(
                 cols,
                 listOf("defaultrole", "role", "workrole", "defaultworkrole", "trade", "jobrole", "labourrole"),
-                if (hasHeader) 6 else (if (cols.size <= 8) 5 else 6)
+                if (hasHeader) 6 else (if (cols.size >= 12) 7 else (if (cols.size <= 8) 5 else 6))
             ).ifBlank { "Helper" }
 
             // 8. Default Unit
             val unit = getColValue(
                 cols,
                 listOf("defaultunit", "unit", "plant", "workunit"),
-                if (hasHeader) 7 else (if (cols.size <= 8) 6 else 7)
+                if (hasHeader) 7 else (if (cols.size >= 12) 8 else (if (cols.size <= 8) 6 else 7))
             ).ifBlank { "Unit I" }
 
             // 9. Default Shift
             val shift = getColValue(
                 cols,
                 listOf("defaultshift", "shift", "workshift"),
-                if (hasHeader) 8 else (if (cols.size <= 8) 7 else 8)
+                if (hasHeader) 8 else (if (cols.size >= 12) 9 else (if (cols.size <= 8) 7 else 8))
             ).ifBlank { "Shift A" }
 
             // 10. Date Added
             val dateAdded = getColValue(
                 cols,
                 listOf("dateadded", "date", "joiningdate", "createdat"),
-                9
+                if (cols.size >= 12) 10 else 9
             ).ifBlank { todayStr }
 
             // 11. Remarks
             val remarks = getColValue(
                 cols,
                 listOf("remarks", "permanentremarks", "note", "notes", "comments"),
-                10
+                if (cols.size >= 12) 11 else 10
             )
 
             val matchedContractor = if (type == EmployeeTypes.STAFF) null else contractorsMap[contractor.lowercase()]
 
             employeesToAdd.add(
                 Employee(
+                    empCode = empCode,
                     name = name,
                     type = type,
                     status = status,
@@ -920,7 +958,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     // Full Database Backup Export (Includes Employees, Contractors, Config, All Historical Daily Attendance & Verifications)
     suspend fun exportCompleteDatabaseBackupJson(): String = withContext(Dispatchers.IO) {
         val root = JSONObject()
-        root.put("version", 2)
+        root.put("version", 3)
         root.put("backupType", "FULL_DATABASE_BACKUP")
         root.put("appName", "BSPManpower")
         root.put("backupTimestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).format(Date()))
@@ -930,6 +968,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         employees.forEach { emp ->
             val obj = JSONObject().apply {
                 put("id", emp.id)
+                put("empCode", emp.empCode)
                 put("name", emp.name)
                 put("type", emp.type)
                 put("status", emp.status)
@@ -982,6 +1021,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 put("id", att.id)
                 put("date", att.date)
                 put("employeeId", att.employeeId)
+                put("employeeCode", att.employeeCode)
                 put("employeeName", att.employeeName)
                 put("employeeType", att.employeeType)
                 put("isPresent", att.isPresent)
@@ -1078,6 +1118,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                     list.add(
                         Employee(
                             id = obj.optLong("id", 0L),
+                            empCode = obj.optString("empCode", ""),
                             name = obj.optString("name", "Unnamed"),
                             type = empType,
                             status = obj.optString("status", EmployeeStatuses.ACTIVE),
@@ -1108,6 +1149,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                             id = obj.optLong("id", 0L),
                             date = obj.optString("date", todayStr),
                             employeeId = obj.optLong("employeeId", 0L),
+                            employeeCode = obj.optString("employeeCode", ""),
                             employeeName = obj.optString("employeeName", ""),
                             employeeType = obj.optString("employeeType", EmployeeTypes.LABOUR),
                             isPresent = obj.optBoolean("isPresent", false),
@@ -1174,6 +1216,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         allEmployees.value.forEach { emp ->
             val obj = JSONObject().apply {
                 put("id", emp.id)
+                put("empCode", emp.empCode)
                 put("name", emp.name)
                 put("type", emp.type)
                 put("status", emp.status)
@@ -1271,27 +1314,40 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     }
 
     // --- REPORT STRING BUILDERS ---
-    fun generateMorningReportWhatsApp(): String {
+    fun generateMorningReportWhatsApp(targetUnit: String? = null): String {
         val date = _selectedDate.value
-
-        val allEmps = allEmployees.value.filter { it.status != EmployeeStatuses.OUT }
-        val activeStaff = allEmps.filter { it.type == EmployeeTypes.STAFF }
-        val activeLabour = allEmps.filter { it.type != EmployeeTypes.STAFF }
+        val isScopedUnit = !targetUnit.isNullOrBlank() && !targetUnit.equals("All", ignoreCase = true) && !targetUnit.equals("All Units", ignoreCase = true)
 
         val attendances = _attendanceStream.value
         val attById = attendances.associateBy { it.employeeId }
+        val attByCode = attendances.filter { it.employeeCode.isNotBlank() }.associateBy { it.employeeCode.trim().lowercase() }
         val attByName = attendances.associateBy { it.employeeName.trim().lowercase() }
 
-        val staffPresentCount = activeStaff.count { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent == true }
-        val labourPresentCount = activeLabour.count { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent == true }
+        fun getAtt(emp: Employee) = attById[emp.id]
+            ?: (if (emp.empCode.isNotBlank()) attByCode[emp.empCode.trim().lowercase()] else null)
+            ?: attByName[emp.name.trim().lowercase()]
+
+        val allEmps = allEmployees.value.filter { it.status != EmployeeStatuses.OUT }.filter { emp ->
+            if (!isScopedUnit) true
+            else {
+                val att = getAtt(emp)
+                val unit = att?.dayUnit?.ifBlank { null } ?: emp.defaultUnit.ifBlank { "Unit I" }
+                unit.equals(targetUnit, ignoreCase = true)
+            }
+        }
+        val activeStaff = allEmps.filter { it.type == EmployeeTypes.STAFF }
+        val activeLabour = allEmps.filter { it.type != EmployeeTypes.STAFF }
+
+        val staffPresentCount = activeStaff.count { getAtt(it)?.isPresent == true }
+        val labourPresentCount = activeLabour.count { getAtt(it)?.isPresent == true }
         val totalOnFloor = staffPresentCount + labourPresentCount
 
-        val presentLabourers = activeLabour.filter { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent == true }
+        val presentLabourers = activeLabour.filter { getAtt(it)?.isPresent == true }
 
         // Contractor breakdown
         val contractorCounts = mutableMapOf<String, Int>()
         presentLabourers.forEach { emp ->
-            val att = attById[emp.id] ?: attByName[emp.name.trim().lowercase()]
+            val att = getAtt(emp)
             val contractor = att?.dayContractorName?.ifBlank { null }
                 ?: emp.contractorName.ifBlank { null }
                 ?: "Direct / In-house"
@@ -1301,7 +1357,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         // Work assigned breakdown (labor present)
         val roleCounts = mutableMapOf<String, Int>()
         presentLabourers.forEach { emp ->
-            val att = attById[emp.id] ?: attByName[emp.name.trim().lowercase()]
+            val att = getAtt(emp)
             val role = att?.dayWorkRole?.ifBlank { null }
                 ?: emp.defaultWorkRole.ifBlank { null }
             if (!role.isNullOrBlank()) {
@@ -1309,12 +1365,23 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             }
         }
 
+        // Department breakdown (labor present)
+        val deptCounts = mutableMapOf<String, Int>()
+        presentLabourers.forEach { emp ->
+            val att = getAtt(emp)
+            val dept = att?.dayDepartment?.ifBlank { null }
+                ?: emp.permanentDepartment.ifBlank { null }
+            if (!dept.isNullOrBlank()) {
+                deptCounts[dept] = (deptCounts[dept] ?: 0) + 1
+            }
+        }
+
         // Shift split (present)
         var dayShiftCount = 0
         var nightShiftCount = 0
-        val allPresentWorkers = allEmps.filter { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent == true }
+        val allPresentWorkers = allEmps.filter { getAtt(it)?.isPresent == true }
         allPresentWorkers.forEach { emp ->
-            val att = attById[emp.id] ?: attByName[emp.name.trim().lowercase()]
+            val att = getAtt(emp)
             val shift = att?.dayShift?.ifBlank { null } ?: emp.defaultShift.ifBlank { "Shift A" }
             val s = shift.lowercase()
             if (s.contains("night") || s.contains("shift b") || s.contains("shift c") || s.contains("2nd") || s.contains("3rd")) {
@@ -1326,13 +1393,18 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
         // Absent staff
         val absentStaffNames = activeStaff
-            .filter { (attById[it.id] ?: attByName[it.name.trim().lowercase()])?.isPresent != true }
+            .filter { getAtt(it)?.isPresent != true }
             .map { it.name }
         val absentStaffStr = if (absentStaffNames.isEmpty()) "None" else absentStaffNames.joinToString(", ")
 
         val sb = StringBuilder()
-        sb.append("BSP Metatech LLP — Chakan\n")
-        sb.append("Attendance Report — $date\n\n")
+        if (isScopedUnit) {
+            sb.append("BSP Metatech LLP — Chakan [$targetUnit]\n")
+            sb.append("Attendance Report ($targetUnit) — $date\n\n")
+        } else {
+            sb.append("BSP Metatech LLP — Chakan\n")
+            sb.append("Attendance Report — $date\n\n")
+        }
 
         sb.append("Staff present: $staffPresentCount / ${activeStaff.size}\n")
         sb.append("Labor present: $labourPresentCount / ${activeLabour.size}\n")
@@ -1359,11 +1431,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         sb.append("\n")
 
         sb.append("--- By department (labor present) ---\n")
-        if (roleCounts.isEmpty()) {
+        if (deptCounts.isEmpty()) {
             sb.append("None present\n")
         } else {
-            roleCounts.forEach { (r, count) ->
-                sb.append("$r: $count\n")
+            deptCounts.forEach { (d, count) ->
+                sb.append("$d: $count\n")
             }
         }
         sb.append("\n")
@@ -1381,54 +1453,93 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
     fun generateDetailedCsv(): String {
         val sb = StringBuilder()
-        sb.append("Date,Employee Name,Type,Status,Present,Department,Work/Role,Contractor,Unit,Shift,Time,Remarks\n")
+        sb.append("Date,Employee Code,Employee Name,Type,Status,Present,Department,Work/Role,Contractor,Unit,Shift,Time,Remarks\n")
+        fun escapeCsv(s: String): String {
+            val escaped = s.replace("\"", "\"\"")
+            return "\"$escaped\""
+        }
         dailyAttendanceItems.value.forEach { item ->
-            sb.append("\"${_selectedDate.value}\",")
-            sb.append("\"${item.employee.name}\",")
-            sb.append("\"${item.employee.type}\",")
-            sb.append("\"${item.employee.status}\",")
+            sb.append(escapeCsv(_selectedDate.value)).append(",")
+            sb.append(escapeCsv(item.employee.empCode)).append(",")
+            sb.append(escapeCsv(item.employee.name)).append(",")
+            sb.append(escapeCsv(item.employee.type)).append(",")
+            sb.append(escapeCsv(item.employee.status)).append(",")
             sb.append(if (item.isPresent) "\"Present\"," else "\"Absent\",")
-            sb.append("\"${item.effectiveDepartment}\",")
-            sb.append("\"${item.effectiveWorkRole}\",")
-            sb.append("\"${item.effectiveContractor}\",")
-            sb.append("\"${item.effectiveUnit}\",")
-            sb.append("\"${item.effectiveShift}\",")
-            sb.append("\"${item.attendanceTime}\",")
-            sb.append("\"${item.dayRemarks}\"\n")
+            sb.append(escapeCsv(item.effectiveDepartment)).append(",")
+            sb.append(escapeCsv(item.effectiveWorkRole)).append(",")
+            sb.append(escapeCsv(item.effectiveContractor)).append(",")
+            sb.append(escapeCsv(item.effectiveUnit)).append(",")
+            sb.append(escapeCsv(item.effectiveShift)).append(",")
+            sb.append(escapeCsv(item.attendanceTime)).append(",")
+            sb.append(escapeCsv(item.dayRemarks)).append("\n")
         }
         return sb.toString()
     }
 
-    fun generateSummaryCsv(): String {
-        val summary = manpowerSummary.value
+    fun generateSummaryCsv(targetUnit: String? = null): String {
+        val isScopedUnit = !targetUnit.isNullOrBlank() && !targetUnit.equals("All", ignoreCase = true) && !targetUnit.equals("All Units", ignoreCase = true)
+        val items = if (!isScopedUnit) dailyAttendanceItems.value else dailyAttendanceItems.value.filter { it.effectiveUnit.equals(targetUnit, ignoreCase = true) }
+        val presentItems = items.filter { it.isPresent }
+
+        var staffCount = 0
+        var labourCount = 0
+        val contractorMap = mutableMapOf<String, Int>()
+        val deptStaffMap = mutableMapOf<String, Int>()
+        val deptLabourMap = mutableMapOf<String, Int>()
+        val unitMap = mutableMapOf<String, Int>()
+        val roleMap = mutableMapOf<String, Int>()
+
+        presentItems.forEach { item ->
+            val emp = item.employee
+            if (emp.type == EmployeeTypes.STAFF) {
+                staffCount++
+                val dept = item.effectiveDepartment.ifBlank { "Unassigned" }
+                deptStaffMap[dept] = (deptStaffMap[dept] ?: 0) + 1
+            } else {
+                labourCount++
+                val contractor = item.effectiveContractor.ifBlank { "Direct / In-house" }
+                contractorMap[contractor] = (contractorMap[contractor] ?: 0) + 1
+                val dept = item.effectiveDepartment.ifBlank { "Unassigned" }
+                deptLabourMap[dept] = (deptLabourMap[dept] ?: 0) + 1
+            }
+            val unit = item.effectiveUnit.ifBlank { "Unit I" }
+            unitMap[unit] = (unitMap[unit] ?: 0) + 1
+            val role = item.effectiveWorkRole.ifBlank { "General" }
+            roleMap[role] = (roleMap[role] ?: 0) + 1
+        }
+
         val sb = StringBuilder()
-        sb.append("BSP METATECH LLP - MANPOWER SUMMARY\n")
+        if (isScopedUnit) {
+            sb.append("BSP METATECH LLP - MANPOWER SUMMARY [$targetUnit]\n")
+        } else {
+            sb.append("BSP METATECH LLP - MANPOWER SUMMARY\n")
+        }
         sb.append("Date,${_selectedDate.value}\n")
-        sb.append("Total Staff Present,${summary.totalStaffPresent}\n")
-        sb.append("Total Labourers Present,${summary.totalLabourersPresent}\n")
-        sb.append("Grand Total Manpower,${summary.grandTotalPresent}\n\n")
+        sb.append("Total Staff Present,$staffCount\n")
+        sb.append("Total Labourers Present,$labourCount\n")
+        sb.append("Grand Total Manpower,${staffCount + labourCount}\n\n")
 
         sb.append("Contractor,Count\n")
-        summary.contractorCounts.forEach { (c, cnt) ->
+        contractorMap.forEach { (c, cnt) ->
             sb.append("\"$c\",$cnt\n")
         }
 
         sb.append("\nDepartment,Staff,Labour,Total\n")
-        val allDeptNames = (summary.departmentStaffCounts.keys + summary.departmentLabourCounts.keys).distinct().sorted()
+        val allDeptNames = (deptStaffMap.keys + deptLabourMap.keys).distinct().sorted()
         allDeptNames.forEach { d ->
-            val staff = summary.departmentStaffCounts[d] ?: 0
-            val labour = summary.departmentLabourCounts[d] ?: 0
+            val staff = deptStaffMap[d] ?: 0
+            val labour = deptLabourMap[d] ?: 0
             val total = staff + labour
             sb.append("\"$d\",$staff,$labour,$total\n")
         }
 
         sb.append("\nUnit,Count\n")
-        summary.unitCounts.forEach { (u, cnt) ->
+        unitMap.forEach { (u, cnt) ->
             sb.append("\"$u\",$cnt\n")
         }
 
         sb.append("\nRole,Count\n")
-        summary.roleCounts.forEach { (r, cnt) ->
+        roleMap.forEach { (r, cnt) ->
             sb.append("\"$r\",$cnt\n")
         }
 
@@ -1437,12 +1548,13 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
     fun generateRoosterCsv(): String {
         val sb = StringBuilder()
-        sb.append("Name,Type,Status,Department,Designation,Contractor,Default Role,Default Unit,Default Shift,Date Added,Remarks\n")
+        sb.append("Employee Code,Name,Type,Status,Department,Designation,Contractor,Default Role,Default Unit,Default Shift,Date Added,Remarks\n")
         fun escapeCsv(s: String): String {
             val escaped = s.replace("\"", "\"\"")
             return "\"$escaped\""
         }
         allEmployees.value.forEach { emp ->
+            sb.append(escapeCsv(emp.empCode)).append(",")
             sb.append(escapeCsv(emp.name)).append(",")
             sb.append(escapeCsv(emp.type)).append(",")
             sb.append(escapeCsv(emp.status)).append(",")

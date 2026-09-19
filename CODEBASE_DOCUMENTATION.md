@@ -66,11 +66,27 @@ BSPUtility/
 │   │   │   │   │       └── ManpowerRepository.kt   # Clean repository layer abstracting DAO
 │   │   │   │   ├── ui/
 │   │   │   │   │   ├── components/
-│   │   │   │   │   │   ├── AttendanceLabourDialog.kt  # Labour daily override dialog
-│   │   │   │   │   │   ├── AttendanceStaffDialog.kt   # Staff in-time & remarks dialog
-│   │   │   │   │   │   ├── CollapsibleSection.kt      # Expandable accordion component
-│   │   │   │   │   │   ├── DateNavigationBar.kt       # Day navigator with DatePicker modal
-│   │   │   │   │   │   └── StatusBadge.kt             # Status & presence indicator pills
+│   │   │   │   │   │   ├── AddConfigDialog.kt            # Taxonomy item creation/editing modal
+│   │   │   │   │   │   ├── AddContractorDialog.kt        # Contractor creation/editing modal
+│   │   │   │   │   │   ├── AddEditEmployeeDialog.kt      # Full master employee form modal
+│   │   │   │   │   │   ├── AppNavigationBar.kt           # 5-tab NavigationBar & NavigationTab enum
+│   │   │   │   │   │   ├── AttendanceCard.kt             # Daily worker row item with toggle buttons
+│   │   │   │   │   │   ├── AttendanceLabourDialog.kt     # Labour daily override dialog
+│   │   │   │   │   │   ├── AttendanceStaffDialog.kt      # Staff in-time & remarks dialog
+│   │   │   │   │   │   ├── BreakdownCard.kt              # Key-value statistical breakdown card
+│   │   │   │   │   │   ├── CollapsibleSection.kt         # Expandable accordion component
+│   │   │   │   │   │   ├── DateNavigationBar.kt          # Day navigator with DatePicker modal
+│   │   │   │   │   │   ├── DepartmentAllocationCard.kt   # Department staffing summary table
+│   │   │   │   │   │   ├── DepartmentVerificationCard.kt # Floor supervisor sign-off card
+│   │   │   │   │   │   ├── JsonBackupDialog.kt           # JSON/CSV roster backup & restore modal
+│   │   │   │   │   │   ├── LabourGroupedList.kt          # Grouped labourer breakdown by department
+│   │   │   │   │   │   ├── MetricCounter.kt              # Hero statistics counter tile
+│   │   │   │   │   │   ├── PasteImportDialog.kt          # Bulk employee name import modal
+│   │   │   │   │   │   ├── RestoreFullDatabaseDialog.kt  # Full database disaster recovery modal
+│   │   │   │   │   │   ├── RoosterEmployeeCard.kt        # Master roster employee display card
+│   │   │   │   │   │   ├── StatusBadge.kt                # Status & presence indicator pills
+│   │   │   │   │   │   ├── TopBrandBar.kt                # Top header bar with brand logo & insets
+│   │   │   │   │   │   └── WorkersListDialog.kt          # Dialog displaying active workers in group
 │   │   │   │   │   ├── preview/
 │   │   │   │   │   │   └── PreviewData.kt          # Mock data for Compose previews
 │   │   │   │   │   ├── screens/
@@ -85,18 +101,18 @@ BSPUtility/
 │   │   │   │   │   │   └── Type.kt                 # Typography definitions
 │   │   │   │   │   └── viewmodel/
 │   │   │   │   │       └── ManpowerViewModel.kt    # Core business logic & combined states
-│   │   │   └── res/
-│   │   │       ├── values/
-│   │   │       │   ├── colors.xml                  # Industrial native color resources
-│   │   │       │   ├── strings.xml                 # App strings
-│   │   │       │   └── themes.xml                  # Base window theme
-│   │   │       └── AndroidManifest.xml
-│   │   └── test/                                   # Host unit & screenshot tests
-│   └── build.gradle.kts                            # App-level build script
-├── gradle/
-│   ├── libs.versions.toml                          # Version catalog
-│   └── wrapper/                                    # Gradle wrapper configuration
-└── settings.gradle.kts
+│   │   │   │   └── res/
+│   │   │   │       ├── values/
+│   │   │   │       │   ├── colors.xml                  # Industrial native color resources
+│   │   │   │       │   ├── strings.xml                 # App strings
+│   │   │   │       │   └── themes.xml                  # Base window theme
+│   │   │   │       └── AndroidManifest.xml
+│   │   │   └── test/                                   # Host unit & screenshot tests
+│   │   └── build.gradle.kts                            # App-level build script
+│   ├── gradle/
+│   │   ├── libs.versions.toml                          # Version catalog
+│   │   └── wrapper/                                    # Gradle wrapper configuration
+│   └── settings.gradle.kts
 ```
 
 ---
@@ -201,6 +217,34 @@ The top-level `MainActivity` renders a 5-tab `NavigationBar`:
 | **Verify** | `VerificationScreen` | Department progress bar, supervisor dropdown sign-offs, expandable labour list verification. |
 | **Reports** | `ReportsScreen` | Morning headcount hero card, 1-tap WhatsApp copy/share, CSV downloads, multi-category breakdown cards. |
 | **Settings** | `MasterDataScreen` | CRUD for Contractors, Departments, Designations, Units, Labour Roles, and Custom Fields. |
+
+### 6.1. Modular Component Architecture (`com.gratus.bsputility.ui.components`)
+To ensure high maintainability and testability, all screens are modularized with composables extracted into dedicated files:
+
+- **Navigation & Brand Bars**:
+  - `TopBrandBar.kt`: Standardized top header with company branding (`BSP Metatech LLP`) and status bar padding.
+  - `AppNavigationBar.kt`: Bottom navigation bar with 5 tabs and `NavigationTab` route definitions.
+  - `DateNavigationBar.kt`: Date step navigation bar with DatePicker calendar modal.
+- **Attendance & Cards**:
+  - `AttendanceCard.kt`: Daily attendance card with 48dp rapid toggle button, time/remarks preview, and touch feedback.
+  - `RoosterEmployeeCard.kt`: Roster library card with status badges, metadata tags, and edit/delete actions.
+  - `DepartmentVerificationCard.kt`: Shop floor sign-off card with verification progress, supervisor selector, and fast "Same as Yesterday" actions.
+  - `StatusBadge.kt`: Clean chip indicators for Active, Debarred, Out, Present, and Absent states.
+- **Reports & Metric Visuals**:
+  - `MetricCounter.kt`: KPI count block for Staff, Labour, Housekeeping, and Total headcount.
+  - `BreakdownCard.kt`: Multi-row tabular card for contractor and unit breakdowns.
+  - `DepartmentAllocationCard.kt`: Two-column department headcount and labour-breakdown table with drill-down modal trigger.
+  - `LabourGroupedList.kt`: Department-grouped labour lists for inspection and floor verification.
+- **Modals & Dialogs**:
+  - `AttendanceLabourDialog.kt` & `AttendanceStaffDialog.kt`: Fine-grained assignment override dialogs.
+  - `AddEditEmployeeDialog.kt`: Form dialog for creating/updating staff and labour roster records.
+  - `PasteImportDialog.kt`: Batch import modal for pasting raw names list.
+  - `JsonBackupDialog.kt`: Roster JSON/CSV export and import modal.
+  - `AddContractorDialog.kt`: Contractor/agency creation and editing modal.
+  - `AddConfigDialog.kt`: Taxonomy creation modal for Departments, Roles, Units, Shifts, and Custom Fields.
+  - `RestoreFullDatabaseDialog.kt`: Disaster recovery full database backup restore modal.
+  - `WorkersListDialog.kt`: Modal listing all workers assigned to a specific department.
+  - `CollapsibleSection.kt`: Expandable/collapsible container for grouped lists.
 
 ---
 

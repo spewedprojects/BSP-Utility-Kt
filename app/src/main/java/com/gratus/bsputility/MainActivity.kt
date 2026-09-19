@@ -55,7 +55,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gratus.bsputility.data.models.EmployeeTypes
+import com.gratus.bsputility.ui.components.AppNavigationBar
 import com.gratus.bsputility.ui.components.DateNavigationBar
+import com.gratus.bsputility.ui.components.NavigationTab
+import com.gratus.bsputility.ui.components.TopBrandBar
 import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.screens.AttendanceScreen
 import com.gratus.bsputility.ui.screens.AttendanceScreenContent
@@ -99,14 +102,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-}
-
-enum class NavigationTab(val route: String, val title: String, val icon: ImageVector) {
-    Attendance("attendance", "Attendance", Icons.Default.FactCheck),
-    Rooster("rooster", "Rooster", Icons.Default.People),
-    Verification("verification", "Verify", Icons.Default.VerifiedUser),
-    Reports("reports", "Reports", Icons.Default.Assessment),
-    Settings("settings", "Settings", Icons.Default.Settings);
 }
 
 @Composable
@@ -153,52 +148,7 @@ fun MainAppContent(
         topBar = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 // Top Brand Bar
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = IndustrialNavy900,
-                    shadowElevation = 4.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(IndustrialAmber600),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Factory,
-                                    contentDescription = null,
-                                    tint = IndustrialNavy900,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "BSP Metatech LLP",
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 16.sp,
-                                    color = Color.White
-                                )
-                                Text(
-                                    text = "Chakan • Contract Labour & Staff Attendance",
-                                    fontSize = 11.sp,
-                                    color = IndustrialAmber600,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-                }
+                TopBrandBar()
 
                 // Date Navigation Bar (visible on Attendance, Verification, and Reports)
                 if (selectedTab != NavigationTab.Settings && selectedTab != NavigationTab.Rooster) {
@@ -212,41 +162,10 @@ fun MainAppContent(
             }
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                windowInsets = NavigationBarDefaults.windowInsets,
-                tonalElevation = 6.dp,
-                modifier = Modifier.testTag("bottom_nav_bar")
-            ) {
-                NavigationTab.entries.forEach { tab ->
-                    val isSelected = selectedTab == tab
-                    NavigationBarItem(
-                        icon = {
-                            Icon(
-                                imageVector = tab.icon,
-                                contentDescription = tab.title
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = tab.title,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        selected = isSelected,
-                        onClick = { onTabSelected(tab) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.secondary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        ),
-                        modifier = Modifier.testTag("nav_tab_${tab.route}")
-                    )
-                }
-            }
+            AppNavigationBar(
+                selectedTab = selectedTab,
+                onTabSelected = onTabSelected
+            )
         }
     ) { innerPadding ->
         Box(

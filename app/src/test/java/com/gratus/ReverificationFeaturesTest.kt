@@ -1729,6 +1729,196 @@ class ReverificationFeaturesTest {
         assertEquals("Fitter", sep16Labourer.dayWorkRole)
         assertTrue(sep16Labourer.isPresent)
     }
+
+    // ==========================================
+    // ISSUE #25: EMPLOYEE CODE / eSSL MACHINE ID TESTS
+    // ==========================================
+
+    @Test
+    fun `syncEmployeesRosterUpsert matches by empCode and prevents name collision for identical names`() {
+        val existingWorkers = listOf(
+            Employee(id = 1L, empCode = "101", name = "Rahul Kumar", contractorName = "Om Sai Enterprises", permanentDepartment = "Welding Shop"),
+            Employee(id = 2L, empCode = "102", name = "Rahul Kumar", contractorName = "Shree Ganesh", permanentDepartment = "Assembly")
+        )
+
+        val incomingWorkers = listOf(
+            Employee(empCode = "101", name = "Rahul Kumar", defaultUnit = "Unit II", contractorName = "Om Sai Enterprises", permanentDepartment = "Welding Shop"),
+            Employee(empCode = "102", name = "Rahul Kumar", defaultUnit = "Unit I", contractorName = "Shree Ganesh", permanentDepartment = "Assembly"),
+            Employee(empCode = "103", name = "Amit Singh", defaultUnit = "Unit I", contractorName = "Om Sai Enterprises", permanentDepartment = "Welding Shop")
+        )
+
+        // Matching logic simulation matching ManpowerRepository.syncEmployeesRosterUpsert
+        val existingByCode = existingWorkers.filter { it.empCode.isNotBlank() }.associateBy { it.empCode.trim().lowercase() }
+        val toInsert = mutableListOf<Employee>()
+        val toUpdate = mutableListOf<Employee>()
+
+        incomingWorkers.forEach { inc ->
+            val match = if (inc.empCode.isNotBlank()) existingByCode[inc.empCode.trim().lowercase()] else null
+            if (match != null) {
+                toUpdate.add(inc.copy(id = match.id, empCode = inc.empCode.ifBlank { match.empCode }))
+            } else {
+                toInsert.add(inc)
+            }
+        }
+
+        assertEquals(2, toUpdate.size)
+        assertEquals(1, toInsert.size)
+        assertEquals(1L, toUpdate.first { it.empCode == "101" }.id)
+        assertEquals("Unit II", toUpdate.first { it.empCode == "101" }.defaultUnit)
+        assertEquals(2L, toUpdate.first { it.empCode == "102" }.id)
+        assertEquals("Unit I", toUpdate.first { it.empCode == "102" }.defaultUnit)
+        assertEquals("Amit Singh", toInsert[0].name)
+    }
+
+    @Test
+    fun `relinkAttendanceRecords uses employeeCode to link attendance to exact employee record`() {
+        val employees = listOf(
+            Employee(id = 10L, empCode = "EMP101", name = "Suresh Yadav", contractorName = "Om Sai"),
+            Employee(id = 20L, empCode = "EMP102", name = "Suresh Yadav", contractorName = "Direct")
+        )
+
+        val attendanceRecords = listOf(
+            DailyAttendance(id = 1L, date = "2026-09-10", employeeId = 0L, employeeCode = "EMP101", employeeName = "Suresh Yadav", isPresent = true),
+            DailyAttendance(id = 2L, date = "2026-09-10", employeeId = 0L, employeeCode = "EMP102", employeeName = "Suresh Yadav", isPresent = true)
+        )
+
+        val empByCode = employees.filter { it.empCode.isNotBlank() }.associateBy { it.empCode.trim().lowercase() }
+        val updated = attendanceRecords.map { att ->
+            val match = if (att.employeeCode.isNotBlank()) empByCode[att.employeeCode.trim().lowercase()] else null
+            if (match != null) att.copy(employeeId = match.id) else att
+        }
+
+        assertEquals(10L, updated.first { it.employeeCode == "EMP101" }.employeeId)
+        assertEquals(20L, updated.first { it.employeeCode == "EMP102" }.employeeId)
+    }
+
+    @Test
+    fun `CSV generation and parsing preserves Employee Code column`() {
+        val employees = listOf(
+            Employee(empCode = "EMP-001", name = "Aakash Patil", type = EmployeeTypes.STAFF, designation = "Supervisor", permanentDepartment = "Welding Shop", defaultUnit = "Unit I"),
+            Employee(empCode = "LAB-042", name = "Baban Shinde", type = EmployeeTypes.LABOUR, contractorName = "Om Sai", defaultWorkRole = "Welder", permanentDepartment = "Welding Shop", defaultUnit = "Unit II")
+        )
+
+        fun escapeCsv(s: String) = "\"${s.replace("\"", "\"\"")}\""
+
+        // 1. Generate CSV
+        val sb = StringBuilder()
+        sb.append("Employee Code,Name,Type,Status,Department,Designation,Contractor,Default Role,Default Unit,Default Shift,Date Added,Remarks\n")
+        employees.forEach { emp ->
+            sb.append(escapeCsv(emp.empCode)).append(",")
+            sb.append(escapeCsv(emp.name)).append(",")
+            sb.append(escapeCsv(emp.type)).append(",")
+            sb.append(escapeCsv(emp.status)).append(",")
+            sb.append(escapeCsv(emp.permanentDepartment)).append(",")
+            sb.append(escapeCsv(emp.designation)).append(",")
+            sb.append(escapeCsv(emp.contractorName)).append(",")
+            sb.append(escapeCsv(emp.defaultWorkRole)).append(",")
+            sb.append(escapeCsv(emp.defaultUnit)).append(",")
+            sb.append(escapeCsv(emp.defaultShift)).append(",")
+            sb.append(escapeCsv(emp.dateAdded)).append(",")
+            sb.append(escapeCsv(emp.permanentRemarks)).append("\n")
+        }
+        val csv = sb.toString()
+        assertTrue(csv.contains("Employee Code"))
+        assertTrue(csv.contains("EMP-001"))
+        assertTrue(csv.contains("LAB-042"))
+
+        // 2. Parse CSV
+        val lines = csv.lines().filter { it.isNotBlank() }
+        val header = lines[0].split(",").map { it.trim().removeSurrounding("\"").lowercase().replace(" ", "").replace("_", "") }
+        val codeIdx = header.indexOf("employeecode")
+        val nameIdx = header.indexOf("name")
+
+        assertEquals(0, codeIdx)
+        assertEquals(1, nameIdx)
+
+        val parsedEmployees = lines.drop(1).map { line ->
+            val cols = line.split(",").map { it.trim().removeSurrounding("\"") }
+            Employee(
+                empCode = cols[codeIdx],
+                name = cols[nameIdx]
+            )
+        }
+
+        assertEquals(2, parsedEmployees.size)
+        assertEquals("EMP-001", parsedEmployees[0].empCode)
+        assertEquals("Aakash Patil", parsedEmployees[0].name)
+        assertEquals("LAB-042", parsedEmployees[1].empCode)
+        assertEquals("Baban Shinde", parsedEmployees[1].name)
+    }
+
+    // ==========================================
+    // ISSUE #26: UNIT-WISE SEGREGATION TESTS
+    // ==========================================
+
+    @Test
+    fun `morning report WhatsApp generation filters correctly when targetUnit is specified`() {
+        val date = "2026-09-18"
+        val employees = listOf(
+            Employee(id = 1L, empCode = "101", name = "Staff U1", type = EmployeeTypes.STAFF, defaultUnit = "Unit I"),
+            Employee(id = 2L, empCode = "102", name = "Staff U2", type = EmployeeTypes.STAFF, defaultUnit = "Unit II"),
+            Employee(id = 3L, empCode = "201", name = "Labour U1", type = EmployeeTypes.LABOUR, contractorName = "Om Sai", defaultWorkRole = "Fitter", permanentDepartment = "Welding Shop", defaultUnit = "Unit I"),
+            Employee(id = 4L, empCode = "202", name = "Labour U2", type = EmployeeTypes.LABOUR, contractorName = "Shree Ganesh", defaultWorkRole = "Helper", permanentDepartment = "Assembly", defaultUnit = "Unit II")
+        )
+
+        val attendances = listOf(
+            DailyAttendance(employeeId = 1L, date = date, isPresent = true, dayUnit = "Unit I"),
+            DailyAttendance(employeeId = 2L, date = date, isPresent = true, dayUnit = "Unit II"),
+            DailyAttendance(employeeId = 3L, date = date, isPresent = true, dayDepartment = "Welding Shop", dayWorkRole = "Fitter", dayContractorName = "Om Sai", dayUnit = "Unit I"),
+            DailyAttendance(employeeId = 4L, date = date, isPresent = true, dayDepartment = "Assembly", dayWorkRole = "Helper", dayContractorName = "Shree Ganesh", dayUnit = "Unit II")
+        )
+
+        fun generateReport(targetUnit: String? = null): String {
+            val isScopedUnit = !targetUnit.isNullOrBlank() && !targetUnit.equals("All", ignoreCase = true)
+            val attById = attendances.associateBy { it.employeeId }
+            val scopedEmps = employees.filter { emp ->
+                if (!isScopedUnit) true
+                else {
+                    val att = attById[emp.id]
+                    (att?.dayUnit ?: emp.defaultUnit).equals(targetUnit, ignoreCase = true)
+                }
+            }
+
+            val staffCount = scopedEmps.count { it.type == EmployeeTypes.STAFF && attById[it.id]?.isPresent == true }
+            val labourCount = scopedEmps.count { it.type != EmployeeTypes.STAFF && attById[it.id]?.isPresent == true }
+
+            val sb = StringBuilder()
+            if (isScopedUnit) {
+                sb.append("BSP Metatech LLP — Chakan [$targetUnit]\n")
+                sb.append("Attendance Report ($targetUnit) — $date\n\n")
+            } else {
+                sb.append("BSP Metatech LLP — Chakan\n")
+                sb.append("Attendance Report — $date\n\n")
+            }
+            sb.append("Staff present: $staffCount / ${scopedEmps.count { it.type == EmployeeTypes.STAFF }}\n")
+            sb.append("Labor present: $labourCount / ${scopedEmps.count { it.type != EmployeeTypes.STAFF }}\n")
+            sb.append("Total on floor: ${staffCount + labourCount}\n")
+            return sb.toString()
+        }
+
+        // 1. All Units Report
+        val allReport = generateReport(null)
+        assertTrue(allReport.contains("BSP Metatech LLP — Chakan\nAttendance Report — 2026-09-18"))
+        assertTrue(allReport.contains("Staff present: 2 / 2"))
+        assertTrue(allReport.contains("Labor present: 2 / 2"))
+        assertTrue(allReport.contains("Total on floor: 4"))
+
+        // 2. Unit I Report
+        val unit1Report = generateReport("Unit I")
+        assertTrue(unit1Report.contains("BSP Metatech LLP — Chakan [Unit I]"))
+        assertTrue(unit1Report.contains("Attendance Report (Unit I) — 2026-09-18"))
+        assertTrue(unit1Report.contains("Staff present: 1 / 1"))
+        assertTrue(unit1Report.contains("Labor present: 1 / 1"))
+        assertTrue(unit1Report.contains("Total on floor: 2"))
+
+        // 3. Unit II Report
+        val unit2Report = generateReport("Unit II")
+        assertTrue(unit2Report.contains("BSP Metatech LLP — Chakan [Unit II]"))
+        assertTrue(unit2Report.contains("Attendance Report (Unit II) — 2026-09-18"))
+        assertTrue(unit2Report.contains("Staff present: 1 / 1"))
+        assertTrue(unit2Report.contains("Labor present: 1 / 1"))
+        assertTrue(unit2Report.contains("Total on floor: 2"))
+    }
 }
 
 

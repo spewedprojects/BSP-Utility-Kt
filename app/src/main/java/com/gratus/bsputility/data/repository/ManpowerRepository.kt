@@ -148,17 +148,26 @@ class ManpowerRepository(private val dao: EmployeeDao) {
     suspend fun relinkAttendanceRecordsByName(): Int {
         val allEmps = dao.getAllEmployeesList()
         if (allEmps.isEmpty()) return 0
-        val empByName = allEmps.associateBy { it.name.trim().lowercase() }
+        val empById = allEmps.associateBy { it.id }
+        val empByCode = allEmps.filter { it.empCode.isNotBlank() }.associateBy { it.empCode.trim().lowercase() }
+        val empByNameAndContractor = allEmps.associateBy { "${it.name.trim().lowercase()}|${it.contractorName.trim().lowercase()}" }
+        val empByNameGroup = allEmps.groupBy { it.name.trim().lowercase() }
+
         val allAttendance = dao.getAllAttendanceRecords()
         if (allAttendance.isEmpty()) return 0
 
         val toUpdate = mutableListOf<DailyAttendance>()
         for (att in allAttendance) {
-            val matched = empByName[att.employeeName.trim().lowercase()]
-            if (matched != null && (att.employeeId != matched.id || att.employeeType != matched.type)) {
+            val matched = (if (att.employeeCode.isNotBlank()) empByCode[att.employeeCode.trim().lowercase()] else null)
+                ?: (if (att.employeeId > 0 && empById.containsKey(att.employeeId)) empById[att.employeeId] else null)
+                ?: empByNameAndContractor["${att.employeeName.trim().lowercase()}|${att.dayContractorName.trim().lowercase()}"]
+                ?: (if (empByNameGroup[att.employeeName.trim().lowercase()]?.size == 1) empByNameGroup[att.employeeName.trim().lowercase()]?.first() else null)
+
+            if (matched != null && (att.employeeId != matched.id || att.employeeCode != matched.empCode || att.employeeType != matched.type)) {
                 toUpdate.add(
                     att.copy(
                         employeeId = matched.id,
+                        employeeCode = matched.empCode,
                         employeeType = matched.type
                     )
                 )
@@ -173,8 +182,10 @@ class ManpowerRepository(private val dao: EmployeeDao) {
     suspend fun syncEmployeesRosterUpsert(importedEmployees: List<Employee>): Int {
         val existingEmployees = dao.getAllEmployeesList()
         val existingById = existingEmployees.associateBy { it.id }
-        val existingByComposite = existingEmployees.associateBy { "${it.name.trim().lowercase()}|${it.contractorName.trim().lowercase()}" }
-        val existingByName = existingEmployees.associateBy { it.name.trim().lowercase() }
+        val existingByCode = existingEmployees.filter { it.empCode.isNotBlank() }.associateBy { it.empCode.trim().lowercase() }
+        val existingByComposite = existingEmployees.associateBy { "${it.name.trim().lowercase()}|${it.contractorName.trim().lowercase()}|${it.permanentDepartment.trim().lowercase()}" }
+        val existingByNameAndContractor = existingEmployees.associateBy { "${it.name.trim().lowercase()}|${it.contractorName.trim().lowercase()}" }
+        val existingByNameGroup = existingEmployees.groupBy { it.name.trim().lowercase() }
 
         val toInsert = mutableListOf<Employee>()
         val toUpdate = mutableListOf<Employee>()
@@ -182,14 +193,17 @@ class ManpowerRepository(private val dao: EmployeeDao) {
 
         for (imported in importedEmployees) {
             val matched = (if (imported.id > 0) existingById[imported.id] else null)
-                ?: existingByComposite["${imported.name.trim().lowercase()}|${imported.contractorName.trim().lowercase()}"]
-                ?: existingByName[imported.name.trim().lowercase()]
+                ?: (if (imported.empCode.isNotBlank()) existingByCode[imported.empCode.trim().lowercase()] else null)
+                ?: existingByComposite["${imported.name.trim().lowercase()}|${imported.contractorName.trim().lowercase()}|${imported.permanentDepartment.trim().lowercase()}"]
+                ?: existingByNameAndContractor["${imported.name.trim().lowercase()}|${imported.contractorName.trim().lowercase()}"]
+                ?: (if (existingByNameGroup[imported.name.trim().lowercase()]?.size == 1) existingByNameGroup[imported.name.trim().lowercase()]?.first() else null)
 
-            if (matched != null) {
+            if (matched != null && matched.id !in matchedExistingIds) {
                 matchedExistingIds.add(matched.id)
                 toUpdate.add(
                     imported.copy(
                         id = matched.id,
+                        empCode = if (imported.empCode.isNotBlank()) imported.empCode.trim() else matched.empCode,
                         dateAdded = if (imported.dateAdded.isNotBlank()) imported.dateAdded else matched.dateAdded,
                         status = if (imported.status.isNotBlank()) imported.status else matched.status,
                         contractorId = imported.contractorId ?: matched.contractorId

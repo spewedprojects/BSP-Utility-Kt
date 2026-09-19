@@ -23,10 +23,11 @@ object EmployeeStatuses {
 data class Employee(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
+    val empCode: String = "", // Employee Code / eSSL Machine ID (e.g. "1042", "BSP-01")
     val name: String,
     val type: String = EmployeeTypes.LABOUR, // Staff, Contract Labour, Housekeeping
     val status: String = EmployeeStatuses.ACTIVE, // Active, Out, Debarred
-    val dateAdded: String, // Auto recorded date string (e.g. "2026-09-10")
+    val dateAdded: String = "", // Auto recorded date string (e.g. "2026-09-10")
     val permanentDepartment: String = "",
     val designation: String = "", // For staff (e.g. HR Trainee, Supervisor)
     val contractorId: Long? = null,
@@ -44,8 +45,9 @@ data class DailyAttendance(
     val id: Long = 0,
     val date: String, // YYYY-MM-DD
     val employeeId: Long,
-    val employeeName: String,
-    val employeeType: String,
+    val employeeCode: String = "", // Employee Code / eSSL Machine ID
+    val employeeName: String = "",
+    val employeeType: String = EmployeeTypes.LABOUR,
     val isPresent: Boolean = false,
     // Dynamic daily overrides (applies only to this day's attendance without modifying master record)
     val dayDepartment: String = "",
