@@ -99,6 +99,10 @@ class ManpowerRepository(private val dao: EmployeeDao) {
         return dao.insertConfigItem(item)
     }
 
+    suspend fun insertConfigItems(items: List<ConfigItem>) {
+        dao.insertConfigItems(items)
+    }
+
     suspend fun clearStaffContractorAssociations(): Int {
         val empCount = dao.clearStaffContractorAssociations()
         val attCount = dao.clearStaffAttendanceContractors()

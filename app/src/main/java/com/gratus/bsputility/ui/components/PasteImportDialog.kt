@@ -138,20 +138,16 @@ fun PasteImportDialog(
                         Text(selectedDept.ifBlank { "Select Department" }, fontSize = 13.sp)
                         Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                     }
-                    DropdownMenu(
+                    AdaptiveDropdownMenu(
                         expanded = deptMenuExp,
-                        onDismissRequest = { deptMenuExp = false }
-                    ) {
-                        departments.forEach { d ->
-                            DropdownMenuItem(
-                                text = { Text(d) },
-                                onClick = {
-                                    selectedDept = d
-                                    deptMenuExp = false
-                                }
-                            )
+                        onDismissRequest = { deptMenuExp = false },
+                        items = departments,
+                        selectedItem = selectedDept.ifBlank { null },
+                        onItemSelected = {
+                            selectedDept = it
+                            deptMenuExp = false
                         }
-                    }
+                    )
                 }
 
                 if (targetType != EmployeeTypes.STAFF) {
@@ -174,20 +170,17 @@ fun PasteImportDialog(
                             Text(selectedContractor.ifBlank { "Select Contractor" }, fontSize = 13.sp)
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                         }
-                        DropdownMenu(
+                        AdaptiveDropdownMenu(
                             expanded = contractorMenuExp,
-                            onDismissRequest = { contractorMenuExp = false }
-                        ) {
-                            contractors.forEach { c ->
-                                DropdownMenuItem(
-                                    text = { Text(c.name) },
-                                    onClick = {
-                                        selectedContractor = c.name
-                                        contractorMenuExp = false
-                                    }
-                                )
+                            onDismissRequest = { contractorMenuExp = false },
+                            items = contractors,
+                            itemLabel = { it.name },
+                            selectedItem = contractors.find { it.name == selectedContractor },
+                            onItemSelected = {
+                                selectedContractor = it.name
+                                contractorMenuExp = false
                             }
-                        }
+                        )
                     }
 
                     var roleMenuExp by remember { mutableStateOf(false) }
@@ -209,20 +202,16 @@ fun PasteImportDialog(
                             Text(selectedRole.ifBlank { "Select Role" }, fontSize = 13.sp)
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                         }
-                        DropdownMenu(
+                        AdaptiveDropdownMenu(
                             expanded = roleMenuExp,
-                            onDismissRequest = { roleMenuExp = false }
-                        ) {
-                            filteredRoles.forEach { r ->
-                                DropdownMenuItem(
-                                    text = { Text(r) },
-                                    onClick = {
-                                        selectedRole = r
-                                        roleMenuExp = false
-                                    }
-                                )
+                            onDismissRequest = { roleMenuExp = false },
+                            items = filteredRoles,
+                            selectedItem = selectedRole.ifBlank { null },
+                            onItemSelected = {
+                                selectedRole = it
+                                roleMenuExp = false
                             }
-                        }
+                        )
                     }
                 }
             }

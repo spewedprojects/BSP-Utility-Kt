@@ -224,20 +224,16 @@ fun AttendanceLabourDialog(
                             Text(selectedDept, fontWeight = FontWeight.Medium)
                             Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Dept")
                         }
-                        DropdownMenu(
+                        AdaptiveDropdownMenu(
                             expanded = deptExpanded,
-                            onDismissRequest = { deptExpanded = false }
-                        ) {
-                            availableDepartments.forEach { dept ->
-                                DropdownMenuItem(
-                                    text = { Text(dept) },
-                                    onClick = {
-                                        selectedDept = dept
-                                        deptExpanded = false
-                                    }
-                                )
+                            onDismissRequest = { deptExpanded = false },
+                            items = availableDepartments,
+                            selectedItem = selectedDept.ifBlank { null },
+                            onItemSelected = {
+                                selectedDept = it
+                                deptExpanded = false
                             }
-                        }
+                        )
                     }
                 }
 
@@ -262,20 +258,16 @@ fun AttendanceLabourDialog(
                             Text(selectedRole, fontWeight = FontWeight.Medium)
                             Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Role")
                         }
-                        DropdownMenu(
+                        AdaptiveDropdownMenu(
                             expanded = roleExpanded,
-                            onDismissRequest = { roleExpanded = false }
-                        ) {
-                            filteredRoles.forEach { role ->
-                                DropdownMenuItem(
-                                    text = { Text(role) },
-                                    onClick = {
-                                        selectedRole = role
-                                        roleExpanded = false
-                                    }
-                                )
+                            onDismissRequest = { roleExpanded = false },
+                            items = filteredRoles,
+                            selectedItem = selectedRole.ifBlank { null },
+                            onItemSelected = {
+                                selectedRole = it
+                                roleExpanded = false
                             }
-                        }
+                        )
                     }
                 }
 
@@ -300,20 +292,17 @@ fun AttendanceLabourDialog(
                             Text(selectedContractor.ifBlank { "Select Contractor" }, fontWeight = FontWeight.Medium)
                             Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Contractor")
                         }
-                        DropdownMenu(
+                        AdaptiveDropdownMenu(
                             expanded = contractorExpanded,
-                            onDismissRequest = { contractorExpanded = false }
-                        ) {
-                            availableContractors.forEach { c ->
-                                DropdownMenuItem(
-                                    text = { Text(c.name) },
-                                    onClick = {
-                                        selectedContractor = c.name
-                                        contractorExpanded = false
-                                    }
-                                )
+                            onDismissRequest = { contractorExpanded = false },
+                            items = availableContractors,
+                            itemLabel = { it.name },
+                            selectedItem = availableContractors.find { it.name == selectedContractor },
+                            onItemSelected = {
+                                selectedContractor = it.name
+                                contractorExpanded = false
                             }
-                        }
+                        )
                     }
                 }
 
@@ -339,20 +328,16 @@ fun AttendanceLabourDialog(
                                 Text(selectedUnit, fontSize = 13.sp)
                                 Icon(Icons.Default.ArrowDropDown, contentDescription = "Unit")
                             }
-                            DropdownMenu(
+                            AdaptiveDropdownMenu(
                                 expanded = unitExpanded,
-                                onDismissRequest = { unitExpanded = false }
-                            ) {
-                                availableUnits.forEach { unit ->
-                                    DropdownMenuItem(
-                                        text = { Text(unit) },
-                                        onClick = {
-                                            selectedUnit = unit
-                                            unitExpanded = false
-                                        }
-                                    )
+                                onDismissRequest = { unitExpanded = false },
+                                items = availableUnits,
+                                selectedItem = selectedUnit.ifBlank { null },
+                                onItemSelected = {
+                                    selectedUnit = it
+                                    unitExpanded = false
                                 }
-                            }
+                            )
                         }
                     }
 
@@ -376,20 +361,16 @@ fun AttendanceLabourDialog(
                                 Text(selectedShift, fontSize = 13.sp)
                                 Icon(Icons.Default.ArrowDropDown, contentDescription = "Shift")
                             }
-                            DropdownMenu(
+                            AdaptiveDropdownMenu(
                                 expanded = shiftExpanded,
-                                onDismissRequest = { shiftExpanded = false }
-                            ) {
-                                shifts.forEach { shift ->
-                                    DropdownMenuItem(
-                                        text = { Text(shift) },
-                                        onClick = {
-                                            selectedShift = shift
-                                            shiftExpanded = false
-                                        }
-                                    )
+                                onDismissRequest = { shiftExpanded = false },
+                                items = shifts,
+                                selectedItem = selectedShift.ifBlank { null },
+                                onItemSelected = {
+                                    selectedShift = it
+                                    shiftExpanded = false
                                 }
-                            }
+                            )
                         }
                     }
                 }

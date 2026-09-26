@@ -3,6 +3,7 @@ package com.gratus.bsputility.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
 import android.widget.Toast
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -33,12 +35,16 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Warning
+import com.gratus.bsputility.data.models.EmployeeTypes
+import com.gratus.bsputility.ui.components.ContractorWorkersDialog
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -173,6 +179,7 @@ fun MasterDataScreenContent(
     // Modals
     var showAddContractorDialog by remember { mutableStateOf<Contractor?>(null) }
     var isNewContractor by remember { mutableStateOf(false) }
+    var viewingContractorLaborers by remember { mutableStateOf<Contractor?>(null) }
     var showAddConfigDialog by remember { mutableStateOf(false) }
     var editingConfigItem by remember { mutableStateOf<ConfigItem?>(null) }
     var newConfigCategory by remember { mutableStateOf("DEPARTMENT") }
@@ -243,7 +250,11 @@ fun MasterDataScreenContent(
                     }
 
                     items(contractors) { contractor ->
-                        val assignedCount = allEmployees.count { it.contractorName == contractor.name }
+                        val assignedCount = allEmployees.count {
+                            (it.contractorId != null && it.contractorId == contractor.id) ||
+                            (it.contractorName.isNotBlank() && it.contractorName.equals(contractor.name, ignoreCase = true))
+                        }
+                        var showPhoneMenu by remember { mutableStateOf(false) }
 
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -265,18 +276,95 @@ fun MasterDataScreenContent(
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     if (contractor.contactPerson.isNotBlank() || contractor.phone.isNotBlank()) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        ) {
+                                            if (contractor.contactPerson.isNotBlank()) {
+                                                Text(
+                                                    text = "${contractor.contactPerson} ",
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            if (contractor.phone.isNotBlank()) {
+                                                Box {
+                                                    Surface(
+                                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        modifier = Modifier.clickable { showPhoneMenu = true }
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Icon(
+                                                                Icons.Default.Phone,
+                                                                contentDescription = "Call or Copy",
+                                                                tint = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.size(11.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.width(3.dp))
+                                                            Text(
+                                                                text = contractor.phone,
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Medium,
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        }
+                                                    }
+
+                                                    DropdownMenu(
+                                                        expanded = showPhoneMenu,
+                                                        onDismissRequest = { showPhoneMenu = false }
+                                                    ) {
+                                                        DropdownMenuItem(
+                                                            text = { Text("Call ${contractor.phone}") },
+                                                            leadingIcon = {
+                                                                Icon(Icons.Default.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                            },
+                                                            onClick = {
+                                                                showPhoneMenu = false
+                                                                try {
+                                                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${contractor.phone}"))
+                                                                    context.startActivity(intent)
+                                                                } catch (e: Exception) {
+                                                                    Toast.makeText(context, "Cannot open dialer: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Copy Number") },
+                                                            leadingIcon = {
+                                                                Icon(Icons.Default.ContentCopy, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                                                            },
+                                                            onClick = {
+                                                                showPhoneMenu = false
+                                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                                clipboard.setPrimaryClip(ClipData.newPlainText("Contractor Phone", contractor.phone))
+                                                                Toast.makeText(context, "Phone number copied to clipboard", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f),
+                                        shape = RoundedCornerShape(4.dp),
+                                        modifier = Modifier.clickable { viewingContractorLaborers = contractor }
+                                    ) {
                                         Text(
-                                            text = "Contact: ${contractor.contactPerson} (${contractor.phone})",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            text = "👥 $assignedCount labourers linked (Tap to view)",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.secondary,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
                                     }
-                                    Text(
-                                        text = "$assignedCount labourers linked",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.secondary,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
                                 }
 
                                 Row {
@@ -688,6 +776,20 @@ fun MasterDataScreenContent(
         RestoreFullDatabaseDialog(
             onRestore = onRestoreFullBackup,
             onDismiss = { showRestoreFullBackupDialog = false }
+        )
+    }
+
+    // Modal: Contractor Laborers list grouped by Unit (Issue #30)
+    viewingContractorLaborers?.let { contractor ->
+        val linkedWorkers = allEmployees.filter {
+            ((it.contractorId != null && it.contractorId == contractor.id) ||
+            (it.contractorName.isNotBlank() && it.contractorName.equals(contractor.name, ignoreCase = true))) &&
+            it.type != EmployeeTypes.STAFF
+        }
+        ContractorWorkersDialog(
+            contractor = contractor,
+            workers = linkedWorkers,
+            onDismiss = { viewingContractorLaborers = null }
         )
     }
 }

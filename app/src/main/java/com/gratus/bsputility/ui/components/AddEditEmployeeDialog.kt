@@ -205,17 +205,16 @@ fun AddEditEmployeeDialog(
                             Text(department.ifBlank { "Select Department" }, fontSize = 13.sp)
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                         }
-                        DropdownMenu(expanded = deptExp, onDismissRequest = { deptExp = false }) {
-                            departments.forEach { d ->
-                                DropdownMenuItem(
-                                    text = { Text(d) },
-                                    onClick = {
-                                        department = d
-                                        deptExp = false
-                                    }
-                                )
+                        AdaptiveDropdownMenu(
+                            expanded = deptExp,
+                            onDismissRequest = { deptExp = false },
+                            items = departments,
+                            selectedItem = department.ifBlank { null },
+                            onItemSelected = {
+                                department = it
+                                deptExp = false
                             }
-                        }
+                        )
                     }
                 }
 
@@ -240,25 +239,25 @@ fun AddEditEmployeeDialog(
                         ) {
                             Row(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
+                                .fillMaxWidth()
+                                .padding(10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(contractorName.ifBlank { "Select Contractor" }, fontSize = 13.sp)
                                 Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                             }
-                            DropdownMenu(expanded = contractorExp, onDismissRequest = { contractorExp = false }) {
-                                contractors.forEach { c ->
-                                    DropdownMenuItem(
-                                        text = { Text(c.name) },
-                                        onClick = {
-                                            contractorName = c.name
-                                            contractorExp = false
-                                        }
-                                    )
+                            AdaptiveDropdownMenu(
+                                expanded = contractorExp,
+                                onDismissRequest = { contractorExp = false },
+                                items = contractors,
+                                itemLabel = { it.name },
+                                selectedItem = contractors.find { it.name == contractorName },
+                                onItemSelected = {
+                                    contractorName = it.name
+                                    contractorExp = false
                                 }
-                            }
+                            )
                         }
                     }
 
@@ -282,17 +281,16 @@ fun AddEditEmployeeDialog(
                                 Text(workRole.ifBlank { "Select Role" }, fontSize = 13.sp)
                                 Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                             }
-                            DropdownMenu(expanded = roleExp, onDismissRequest = { roleExp = false }) {
-                                filteredRoles.forEach { r ->
-                                    DropdownMenuItem(
-                                        text = { Text(r) },
-                                        onClick = {
-                                            workRole = r
-                                            roleExp = false
-                                        }
-                                    )
+                            AdaptiveDropdownMenu(
+                                expanded = roleExp,
+                                onDismissRequest = { roleExp = false },
+                                items = filteredRoles,
+                                selectedItem = workRole.ifBlank { null },
+                                onItemSelected = {
+                                    workRole = it
+                                    roleExp = false
                                 }
-                            }
+                            )
                         }
                     }
                 }
@@ -318,17 +316,16 @@ fun AddEditEmployeeDialog(
                                 Text(unit, fontSize = 13.sp)
                                 Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                             }
-                            DropdownMenu(expanded = unitExp, onDismissRequest = { unitExp = false }) {
-                                units.forEach { u ->
-                                    DropdownMenuItem(
-                                        text = { Text(u) },
-                                        onClick = {
-                                            unit = u
-                                            unitExp = false
-                                        }
-                                    )
+                            AdaptiveDropdownMenu(
+                                expanded = unitExp,
+                                onDismissRequest = { unitExp = false },
+                                items = units,
+                                selectedItem = unit.ifBlank { null },
+                                onItemSelected = {
+                                    unit = it
+                                    unitExp = false
                                 }
-                            }
+                            )
                         }
                     }
 
@@ -351,17 +348,16 @@ fun AddEditEmployeeDialog(
                                 Text(shift.ifBlank { availableShifts.firstOrNull() ?: "Shift A" }, fontSize = 13.sp)
                                 Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                             }
-                            DropdownMenu(expanded = shiftExp, onDismissRequest = { shiftExp = false }) {
-                                availableShifts.forEach { s ->
-                                    DropdownMenuItem(
-                                        text = { Text(s) },
-                                        onClick = {
-                                            shift = s
-                                            shiftExp = false
-                                        }
-                                    )
+                            AdaptiveDropdownMenu(
+                                expanded = shiftExp,
+                                onDismissRequest = { shiftExp = false },
+                                items = availableShifts,
+                                selectedItem = shift.ifBlank { null },
+                                onItemSelected = {
+                                    shift = it
+                                    shiftExp = false
                                 }
-                            }
+                            )
                         }
                     }
                 }

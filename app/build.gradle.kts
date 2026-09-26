@@ -16,8 +16,8 @@ android {
     applicationId = "com.gratus.bsputility"
     minSdk = 24
     targetSdk = 37
-    versionCode = 10
-    versionName = "3.0.0"
+    versionCode = 11
+    versionName = "3.1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

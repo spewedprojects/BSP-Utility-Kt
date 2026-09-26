@@ -313,23 +313,17 @@ fun DepartmentVerificationCard(
                         Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                     }
 
-                    DropdownMenu(
+                    AdaptiveDropdownMenu(
                         expanded = staffDropdownOpen,
                         onDismissRequest = { staffDropdownOpen = false },
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        staffList.forEach { s ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text("${s.name} (${s.designation.ifBlank { s.permanentDepartment }})")
-                                },
-                                onClick = {
-                                    selectedStaffName = s.name
-                                    staffDropdownOpen = false
-                                }
-                            )
+                        items = staffList,
+                        itemLabel = { "${it.name} (${it.designation.ifBlank { it.permanentDepartment }})" },
+                        selectedItem = staffList.find { it.name == selectedStaffName },
+                        onItemSelected = {
+                            selectedStaffName = it.name
+                            staffDropdownOpen = false
                         }
-                    }
+                    )
                 }
 
                 // Verification remarks or time stamped info

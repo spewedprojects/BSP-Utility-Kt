@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -63,9 +64,11 @@ import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
 import com.gratus.bsputility.data.models.ManpowerSummary
+import com.gratus.bsputility.ui.components.AdaptiveDropdownMenu
 import com.gratus.bsputility.ui.components.AttendanceCard
 import com.gratus.bsputility.ui.components.AttendanceLabourDialog
 import com.gratus.bsputility.ui.components.AttendanceStaffDialog
+import com.gratus.bsputility.ui.components.DropdownHeaderAction
 import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import com.gratus.bsputility.ui.theme.PresentGreen
@@ -91,6 +94,9 @@ fun AttendanceScreen(
     val filterType by viewModel.attendanceFilterType.collectAsStateWithLifecycle()
     val filterContractor by viewModel.attendanceFilterContractor.collectAsStateWithLifecycle()
     val filterDepartment by viewModel.attendanceFilterDepartment.collectAsStateWithLifecycle()
+    val filterUnit by viewModel.attendanceFilterUnit.collectAsStateWithLifecycle()
+    val filterShift by viewModel.attendanceFilterShift.collectAsStateWithLifecycle()
+    val sortMode by viewModel.attendanceSortMode.collectAsStateWithLifecycle()
 
     val departments = remember(configItems) {
         configItems.filter { it.category == "DEPARTMENT" }.map { it.name }
@@ -126,6 +132,12 @@ fun AttendanceScreen(
         onFilterContractorChange = { viewModel.setAttendanceFilterContractor(it) },
         filterDepartment = filterDepartment,
         onFilterDepartmentChange = { viewModel.attendanceFilterDepartment.value = it },
+        filterUnit = filterUnit,
+        onFilterUnitChange = { viewModel.attendanceFilterUnit.value = it },
+        filterShift = filterShift,
+        onFilterShiftChange = { viewModel.attendanceFilterShift.value = it },
+        sortMode = sortMode,
+        onSortModeChange = { viewModel.attendanceSortMode.value = it },
         onMarkAllPresent = { viewModel.markAllActivePresent() },
         onTogglePresence = { viewModel.toggleAttendance(it) },
         onSaveStaffAttendance = { emp, isPresent, time, remarks, timestamp ->
@@ -169,6 +181,12 @@ fun AttendanceScreenContent(
     onFilterContractorChange: (String?) -> Unit,
     filterDepartment: String?,
     onFilterDepartmentChange: (String?) -> Unit,
+    filterUnit: String? = null,
+    onFilterUnitChange: (String?) -> Unit = {},
+    filterShift: String? = null,
+    onFilterShiftChange: (String?) -> Unit = {},
+    sortMode: ManpowerViewModel.SortMode = ManpowerViewModel.SortMode.ALPHABETICAL_AZ,
+    onSortModeChange: (ManpowerViewModel.SortMode) -> Unit = {},
     onMarkAllPresent: () -> Unit,
     onTogglePresence: (ManpowerViewModel.EmployeeAttendanceItem) -> Unit,
     onSaveStaffAttendance: (employee: Employee, isPresent: Boolean, time: String, remarks: String, timestamp: Long) -> Unit,
@@ -193,8 +211,11 @@ fun AttendanceScreenContent(
     // Dialog state
     var selectedItemForDialog by remember { mutableStateOf<ManpowerViewModel.EmployeeAttendanceItem?>(null) }
     var debarredItemToConfirm by remember { mutableStateOf<ManpowerViewModel.EmployeeAttendanceItem?>(null) }
+    var showSortMenu by remember { mutableStateOf(false) }
     var showContractorMenu by remember { mutableStateOf(false) }
     var showDeptMenu by remember { mutableStateOf(false) }
+    var showUnitMenu by remember { mutableStateOf(false) }
+    var showShiftMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -357,6 +378,117 @@ fun AttendanceScreenContent(
                         )
                     }
 
+                    // Sort dropdown chip (Issue #29)
+                    item {
+                        Box {
+                            FilterChip(
+                                selected = sortMode != ManpowerViewModel.SortMode.ALPHABETICAL_AZ,
+                                onClick = { showSortMenu = true },
+                                label = {
+                                    Text(
+                                        text = sortMode.label,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.size(14.dp))
+                                }
+                            )
+                            AdaptiveDropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false },
+                                items = ManpowerViewModel.SortMode.values().toList(),
+                                itemLabel = { it.label },
+                                selectedItem = sortMode,
+                                onItemSelected = { onSortModeChange(it) }
+                            )
+                        }
+                    }
+
+                    // Unit filter dropdown chip (Issue #28)
+                    item {
+                        Box {
+                            FilterChip(
+                                selected = filterUnit != null,
+                                onClick = { showUnitMenu = true },
+                                label = {
+                                    Text(
+                                        text = filterUnit ?: "Unit",
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(14.dp))
+                                }
+                            )
+                            AdaptiveDropdownMenu(
+                                expanded = showUnitMenu,
+                                onDismissRequest = { showUnitMenu = false },
+                                items = units,
+                                itemLabel = { it },
+                                selectedItem = filterUnit,
+                                headerItems = listOf(
+                                    DropdownHeaderAction(
+                                        title = "All Units",
+                                        isSelected = filterUnit == null,
+                                        onClick = { onFilterUnitChange(null) }
+                                    )
+                                ),
+                                onItemSelected = { onFilterUnitChange(it) }
+                            )
+                        }
+                    }
+
+                    // Shift filter dropdown chip (Issue #28)
+                    item {
+                        Box {
+                            FilterChip(
+                                selected = filterShift != null,
+                                onClick = { showShiftMenu = true },
+                                label = {
+                                    Text(
+                                        text = filterShift ?: "Shift",
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(14.dp))
+                                }
+                            )
+                            AdaptiveDropdownMenu(
+                                expanded = showShiftMenu,
+                                onDismissRequest = { showShiftMenu = false },
+                                items = shifts,
+                                itemLabel = { it },
+                                selectedItem = filterShift,
+                                headerItems = listOf(
+                                    DropdownHeaderAction(
+                                        title = "All Shifts",
+                                        isSelected = filterShift == null,
+                                        onClick = { onFilterShiftChange(null) }
+                                    ),
+                                    DropdownHeaderAction(
+                                        title = "Day Shift",
+                                        isSelected = filterShift == "Day Shift",
+                                        onClick = { onFilterShiftChange("Day Shift") }
+                                    ),
+                                    DropdownHeaderAction(
+                                        title = "Night Shift",
+                                        isSelected = filterShift == "Night Shift",
+                                        onClick = { onFilterShiftChange("Night Shift") }
+                                    )
+                                ),
+                                onItemSelected = { onFilterShiftChange(it) }
+                            )
+                        }
+                    }
+
                     // Contractor filter dropdown chip
                     item {
                         val contractorChipLabel = when (filterContractor) {
@@ -380,36 +512,32 @@ fun AttendanceScreenContent(
                                     Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(14.dp))
                                 }
                             )
-                            DropdownMenu(
+                            AdaptiveDropdownMenu(
                                 expanded = showContractorMenu,
-                                onDismissRequest = { showContractorMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Clear Filter") },
-                                    onClick = {
-                                        onFilterContractorChange(null)
-                                        showContractorMenu = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("All Contractors") },
-                                    onClick = {
-                                        onFilterContractorChange("ALL_CONTRACTORS")
-                                        if (filterType == "Staff") onFilterTypeChange("All")
-                                        showContractorMenu = false
-                                    }
-                                )
-                                contractors.forEach { c ->
-                                    DropdownMenuItem(
-                                        text = { Text(c.name) },
+                                onDismissRequest = { showContractorMenu = false },
+                                items = contractors,
+                                itemLabel = { it.name },
+                                selectedItem = contractors.find { it.name == filterContractor },
+                                headerItems = listOf(
+                                    DropdownHeaderAction(
+                                        title = "Clear Filter",
+                                        isSelected = filterContractor == null,
+                                        onClick = { onFilterContractorChange(null) }
+                                    ),
+                                    DropdownHeaderAction(
+                                        title = "All Contractors",
+                                        isSelected = filterContractor == "ALL_CONTRACTORS",
                                         onClick = {
-                                            onFilterContractorChange(c.name)
+                                            onFilterContractorChange("ALL_CONTRACTORS")
                                             if (filterType == "Staff") onFilterTypeChange("All")
-                                            showContractorMenu = false
                                         }
                                     )
+                                ),
+                                onItemSelected = {
+                                    onFilterContractorChange(it.name)
+                                    if (filterType == "Staff") onFilterTypeChange("All")
                                 }
-                            }
+                            )
                         }
                     }
 
@@ -431,27 +559,21 @@ fun AttendanceScreenContent(
                                     Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(14.dp))
                                 }
                             )
-                            DropdownMenu(
+                            AdaptiveDropdownMenu(
                                 expanded = showDeptMenu,
-                                onDismissRequest = { showDeptMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("All Departments") },
-                                    onClick = {
-                                        onFilterDepartmentChange(null)
-                                        showDeptMenu = false
-                                    }
-                                )
-                                departments.forEach { dept ->
-                                    DropdownMenuItem(
-                                        text = { Text(dept) },
-                                        onClick = {
-                                            onFilterDepartmentChange(dept)
-                                            showDeptMenu = false
-                                        }
+                                onDismissRequest = { showDeptMenu = false },
+                                items = departments,
+                                itemLabel = { it },
+                                selectedItem = filterDepartment,
+                                headerItems = listOf(
+                                    DropdownHeaderAction(
+                                        title = "All Departments",
+                                        isSelected = filterDepartment == null,
+                                        onClick = { onFilterDepartmentChange(null) }
                                     )
-                                }
-                            }
+                                ),
+                                onItemSelected = { onFilterDepartmentChange(it) }
+                            )
                         }
                     }
                 }

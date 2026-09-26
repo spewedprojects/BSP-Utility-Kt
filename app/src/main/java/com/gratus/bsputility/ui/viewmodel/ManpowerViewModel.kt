@@ -50,17 +50,32 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     private val _selectedDate = MutableStateFlow(dateFormat.format(Date()))
     val selectedDate: StateFlow<String> = _selectedDate.asStateFlow()
 
-    // Search and filters for Attendance Screen
+    enum class SortMode(val label: String) {
+        ALPHABETICAL_AZ("Alphabetical (A - Z)"),
+        ALPHABETICAL_ZA("Alphabetical (Z - A)"),
+        LATEST_JOINED("Latest Joined"),
+        OLDEST_JOINED("Oldest Joined"),
+        LATEST_MODIFIED("Latest Modified"),
+        OLDEST_MODIFIED("Oldest Modified")
+    }
+
+    // Search, filters, and sort for Attendance Screen
     val attendanceSearchQuery = MutableStateFlow("")
     val attendanceFilterType = MutableStateFlow("All") // All, Labour, Staff, Present, Absent
     val attendanceFilterContractor = MutableStateFlow<String?>(null)
     val attendanceFilterDepartment = MutableStateFlow<String?>(null)
+    val attendanceFilterUnit = MutableStateFlow<String?>(null)
+    val attendanceFilterShift = MutableStateFlow<String?>(null)
+    val attendanceSortMode = MutableStateFlow(SortMode.ALPHABETICAL_AZ)
 
-    // Search and filters for Rooster (Employee Library)
+    // Search, filters, and sort for Rooster (Employee Library)
     val roosterSearchQuery = MutableStateFlow("")
     val roosterFilterStatus = MutableStateFlow("All") // All, Staff, Labour, Housekeeping, Debarred, Out
     val roosterFilterContractor = MutableStateFlow<String?>(null)
     val roosterFilterDepartment = MutableStateFlow<String?>(null)
+    val roosterFilterUnit = MutableStateFlow<String?>(null)
+    val roosterFilterShift = MutableStateFlow<String?>(null)
+    val roosterSortMode = MutableStateFlow(SortMode.ALPHABETICAL_AZ)
     val collapsedGroups = MutableStateFlow<Map<String, Boolean>>(emptyMap())
 
     // Mutual exclusivity mutators
@@ -89,6 +104,100 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         roosterFilterContractor.value = contractor
         if (contractor != null && roosterFilterStatus.value == "Staff") {
             roosterFilterStatus.value = "All"
+        }
+    }
+
+    companion object {
+        fun isNightShift(shift: String): Boolean {
+            val s = shift.trim().lowercase(Locale.getDefault())
+            return s.contains("night") || s.contains("shift c")
+        }
+
+        fun sortEmployees(employees: List<Employee>, mode: SortMode): List<Employee> {
+            return when (mode) {
+                SortMode.ALPHABETICAL_AZ -> employees.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+                SortMode.ALPHABETICAL_ZA -> employees.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.name })
+                SortMode.LATEST_JOINED -> employees.sortedWith(compareByDescending<Employee> { it.dateAdded }.thenByDescending { it.id })
+                SortMode.OLDEST_JOINED -> employees.sortedWith(compareBy<Employee> { it.dateAdded }.thenBy { it.id })
+                SortMode.LATEST_MODIFIED -> employees.sortedWith(compareByDescending<Employee> { it.dateAdded }.thenByDescending { it.id })
+                SortMode.OLDEST_MODIFIED -> employees.sortedWith(compareBy<Employee> { it.dateAdded }.thenBy { it.id })
+            }
+        }
+
+        fun sortAttendanceItems(items: List<EmployeeAttendanceItem>, mode: SortMode): List<EmployeeAttendanceItem> {
+            return when (mode) {
+                SortMode.ALPHABETICAL_AZ -> items.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.employee.name })
+                SortMode.ALPHABETICAL_ZA -> items.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.employee.name })
+                SortMode.LATEST_JOINED -> items.sortedWith(compareByDescending<EmployeeAttendanceItem> { it.employee.dateAdded }.thenByDescending { it.employee.id })
+                SortMode.OLDEST_JOINED -> items.sortedWith(compareBy<EmployeeAttendanceItem> { it.employee.dateAdded }.thenBy { it.employee.id })
+                SortMode.LATEST_MODIFIED -> items.sortedWith(compareByDescending<EmployeeAttendanceItem> { if (it.updatedAt > 0L) it.updatedAt else it.employee.id }.thenByDescending { it.employee.dateAdded }.thenByDescending { it.employee.id })
+                SortMode.OLDEST_MODIFIED -> items.sortedWith(compareBy<EmployeeAttendanceItem> { if (it.updatedAt > 0L) it.updatedAt else it.employee.id }.thenBy { it.employee.dateAdded }.thenBy { it.employee.id })
+            }
+        }
+
+        fun generateRoosterCsv(employees: List<Employee>, configItems: List<ConfigItem>): String {
+            val sb = StringBuilder()
+            fun escapeCsv(s: String): String {
+                val escaped = s.replace("\"", "\"\"")
+                return "\"$escaped\""
+            }
+
+            // 1. Gather all configured and populated custom field keys
+            val customFieldConfigs = configItems
+                .filter { it.category == "CUSTOM_FIELD" }
+                .map { it.name }
+
+            val empCustomFieldKeys = mutableSetOf<String>()
+            employees.forEach { emp ->
+                if (emp.customFieldsJson.isNotBlank() && emp.customFieldsJson != "{}") {
+                    try {
+                        val json = JSONObject(emp.customFieldsJson)
+                        val keys = json.keys()
+                        while (keys.hasNext()) {
+                            empCustomFieldKeys.add(keys.next())
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            val allCustomFieldKeys = (customFieldConfigs + empCustomFieldKeys).distinct()
+
+            // 2. Build header row
+            val baseHeaders = listOf(
+                "Employee Code", "Name", "Type", "Status", "Department",
+                "Designation", "Contractor", "Default Role", "Default Unit",
+                "Default Shift", "Date Added", "Remarks"
+            )
+            val fullHeaders = baseHeaders + allCustomFieldKeys
+            sb.append(fullHeaders.joinToString(",") { escapeCsv(it) }).append("\n")
+
+            // 3. Build data rows
+            employees.forEach { emp ->
+                val empJson = try {
+                    if (emp.customFieldsJson.isNotBlank() && emp.customFieldsJson != "{}") JSONObject(emp.customFieldsJson) else null
+                } catch (_: Exception) { null }
+
+                val rowCols = mutableListOf<String>()
+                rowCols.add(escapeCsv(emp.empCode))
+                rowCols.add(escapeCsv(emp.name))
+                rowCols.add(escapeCsv(emp.type))
+                rowCols.add(escapeCsv(emp.status))
+                rowCols.add(escapeCsv(emp.permanentDepartment))
+                rowCols.add(escapeCsv(emp.designation))
+                rowCols.add(escapeCsv(emp.contractorName))
+                rowCols.add(escapeCsv(emp.defaultWorkRole))
+                rowCols.add(escapeCsv(emp.defaultUnit))
+                rowCols.add(escapeCsv(emp.defaultShift))
+                rowCols.add(escapeCsv(emp.dateAdded))
+                rowCols.add(escapeCsv(emp.permanentRemarks))
+
+                allCustomFieldKeys.forEach { cfKey ->
+                    val cfVal = empJson?.optString(cfKey, "") ?: ""
+                    rowCols.add(escapeCsv(cfVal))
+                }
+
+                sb.append(rowCols.joinToString(",")).append("\n")
+            }
+            return sb.toString()
         }
     }
 
@@ -273,16 +382,17 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     // Merges Employee library with day's Attendance records
     data class EmployeeAttendanceItem(
         val employee: Employee,
-        val isPresent: Boolean,
-        val effectiveDepartment: String,
-        val effectiveWorkRole: String,
-        val effectiveContractor: String,
-        val effectiveUnit: String,
-        val effectiveShift: String,
-        val attendanceTime: String,
+        val isPresent: Boolean = false,
+        val effectiveDepartment: String = "",
+        val effectiveWorkRole: String = "",
+        val effectiveContractor: String = "",
+        val effectiveUnit: String = "",
+        val effectiveShift: String = "",
+        val attendanceTime: String = "",
         val attendanceTimestamp: Long = 0L,
-        val dayRemarks: String,
-        val attendanceId: Long?
+        val dayRemarks: String = "",
+        val attendanceId: Long? = null,
+        val updatedAt: Long = 0L
     )
 
     // Unfiltered daily attendance items for the active roster on selectedDate (Issue #12)
@@ -311,7 +421,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 attendanceTime = att?.attendanceTime ?: "",
                 attendanceTimestamp = att?.attendanceTimestamp ?: 0L,
                 dayRemarks = att?.dayRemarks ?: "",
-                attendanceId = att?.id
+                attendanceId = att?.id,
+                updatedAt = att?.updatedAt ?: 0L
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -349,6 +460,22 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
             matchesQuery && matchesType && matchesContractor && matchesDept
         }
+    }.combine(
+        combine(attendanceFilterUnit, attendanceFilterShift, attendanceSortMode) { u, s, sort ->
+            Triple(u, s, sort)
+        }
+    ) { filteredList, (filterUnit, filterShift, sortMode) ->
+        val unitAndShiftFiltered = filteredList.filter { item ->
+            val matchesUnit = filterUnit == null || item.effectiveUnit.equals(filterUnit, ignoreCase = true)
+            val matchesShift = when (filterShift) {
+                null -> true
+                "Day Shift" -> !isNightShift(item.effectiveShift)
+                "Night Shift" -> isNightShift(item.effectiveShift)
+                else -> item.effectiveShift.equals(filterShift, ignoreCase = true)
+            }
+            matchesUnit && matchesShift
+        }
+        sortAttendanceItems(unitAndShiftFiltered, sortMode)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // --- MANPOWER SUMMARY COMPUTATION ---
@@ -794,6 +921,31 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         }
 
         val startIndex = if (hasHeader) 1 else 0
+        val standardNormalizedKeys = setOf(
+            "employeecode", "empcode", "code", "esslid", "biometricid", "esslcode", "staffcode", "laborcode", "labourcode",
+            "name", "employeename", "workername", "fullname", "empname",
+            "type", "employeetype", "category", "emptype",
+            "status", "employeestatus", "empstatus",
+            "department", "dept", "permanentdepartment", "permdept",
+            "designation", "title", "jobtitle", "staffdesignation",
+            "contractor", "contractorname", "agency", "vendor", "contractoragency",
+            "defaultrole", "role", "workrole", "defaultworkrole", "trade", "jobrole", "labourrole",
+            "defaultunit", "unit", "plant", "workunit",
+            "defaultshift", "shift", "workshift",
+            "dateadded", "date", "joiningdate", "createdat",
+            "remarks", "permanentremarks", "note", "notes", "comments"
+        )
+
+        val customFieldColumns = if (hasHeader) {
+            firstLineCols.mapIndexedNotNull { idx, originalName ->
+                val norm = originalName.lowercase().replace(" ", "").replace("_", "")
+                if (norm !in standardNormalizedKeys && originalName.isNotBlank()) {
+                    idx to originalName.trim()
+                } else null
+            }
+        } else emptyList()
+
+        val newCustomFieldsToRegister = mutableSetOf<String>()
         val employeesToAdd = mutableListOf<Employee>()
 
         for (i in startIndex until lines.size) {
@@ -897,6 +1049,17 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 if (cols.size >= 12) 11 else 10
             )
 
+            // Custom fields parsing
+            val customFieldsJsonObj = JSONObject()
+            customFieldColumns.forEach { (idx, colName) ->
+                val value = cols.getOrNull(idx)?.removeSurrounding("\"")?.trim() ?: ""
+                if (value.isNotBlank()) {
+                    customFieldsJsonObj.put(colName, value)
+                    newCustomFieldsToRegister.add(colName)
+                }
+            }
+            val customFieldsJsonStr = if (customFieldsJsonObj.length() > 0) customFieldsJsonObj.toString() else "{}"
+
             val matchedContractor = if (type == EmployeeTypes.STAFF) null else contractorsMap[contractor.lowercase()]
 
             employeesToAdd.add(
@@ -913,7 +1076,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                     defaultWorkRole = if (type == EmployeeTypes.STAFF) "" else role,
                     defaultUnit = unit,
                     defaultShift = shift,
-                    permanentRemarks = remarks
+                    permanentRemarks = remarks,
+                    customFieldsJson = customFieldsJsonStr
                 )
             )
         }
@@ -922,6 +1086,22 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             viewModelScope.launch {
                 // User requirement: "Importing will not merge. only replace."
                 repository.replaceEmployees(employeesToAdd)
+
+                // Register any new custom fields discovered in CSV
+                if (newCustomFieldsToRegister.isNotEmpty()) {
+                    val existingCfNames = allConfigItems.value
+                        .filter { it.category == "CUSTOM_FIELD" }
+                        .map { it.name.trim().lowercase() }
+                        .toSet()
+                    val configsToAdd = newCustomFieldsToRegister
+                        .filter { it.trim().lowercase() !in existingCfNames }
+                        .map { name ->
+                            ConfigItem(category = "CUSTOM_FIELD", name = name, extraType = "TEXT|ALL")
+                        }
+                    if (configsToAdd.isNotEmpty()) {
+                        repository.insertConfigItems(configsToAdd)
+                    }
+                }
             }
         }
         return employeesToAdd.size
@@ -1547,26 +1727,6 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun generateRoosterCsv(): String {
-        val sb = StringBuilder()
-        sb.append("Employee Code,Name,Type,Status,Department,Designation,Contractor,Default Role,Default Unit,Default Shift,Date Added,Remarks\n")
-        fun escapeCsv(s: String): String {
-            val escaped = s.replace("\"", "\"\"")
-            return "\"$escaped\""
-        }
-        allEmployees.value.forEach { emp ->
-            sb.append(escapeCsv(emp.empCode)).append(",")
-            sb.append(escapeCsv(emp.name)).append(",")
-            sb.append(escapeCsv(emp.type)).append(",")
-            sb.append(escapeCsv(emp.status)).append(",")
-            sb.append(escapeCsv(emp.permanentDepartment)).append(",")
-            sb.append(escapeCsv(emp.designation)).append(",")
-            sb.append(escapeCsv(emp.contractorName)).append(",")
-            sb.append(escapeCsv(emp.defaultWorkRole)).append(",")
-            sb.append(escapeCsv(emp.defaultUnit)).append(",")
-            sb.append(escapeCsv(emp.defaultShift)).append(",")
-            sb.append(escapeCsv(emp.dateAdded)).append(",")
-            sb.append(escapeCsv(emp.permanentRemarks)).append("\n")
-        }
-        return sb.toString()
+        return generateRoosterCsv(allEmployees.value, allConfigItems.value)
     }
 }
