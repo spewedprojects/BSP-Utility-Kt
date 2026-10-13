@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.gratus.bsputility.data.models.DateUtils
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeTypes
 import com.gratus.bsputility.ui.preview.PreviewData
@@ -141,8 +142,26 @@ fun RoosterEmployeeCard(
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))
+                val normalizedAddedDate = remember(employee.dateAdded) {
+                    DateUtils.normalizeDate(employee.dateAdded, employee.dateAdded)
+                }
+                val explicitModifiedMillis = remember(employee.customFieldsJson) {
+                    DateUtils.getEmployeeExplicitLastModifiedMillis(employee)
+                }
+                val dateSubtitle = remember(normalizedAddedDate, explicitModifiedMillis) {
+                    if (explicitModifiedMillis > 0L) {
+                        val modDate = DateUtils.formatDateMillis(explicitModifiedMillis)
+                        if (modDate.isNotBlank() && modDate != normalizedAddedDate) {
+                            "Added: $normalizedAddedDate • Modified: $modDate"
+                        } else {
+                            "Added: $normalizedAddedDate"
+                        }
+                    } else {
+                        "Added: $normalizedAddedDate"
+                    }
+                }
                 Text(
-                    text = "Added: ${employee.dateAdded}",
+                    text = dateSubtitle,
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.outline
                 )
@@ -156,9 +175,11 @@ fun RoosterEmployeeCard(
                             val keys = json.keys()
                             while (keys.hasNext()) {
                                 val k = keys.next()
-                                val v = json.optString(k)
-                                if (v.isNotBlank()) {
-                                    map[k] = v
+                                if (!DateUtils.isInternalCustomFieldKey(k)) {
+                                    val v = json.optString(k)
+                                    if (v.isNotBlank() && !v.equals("false", ignoreCase = true)) {
+                                        map[k] = v
+                                    }
                                 }
                             }
                         }

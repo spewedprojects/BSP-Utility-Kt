@@ -4,9 +4,11 @@ import android.content.Intent
 import android.net.Uri
 import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.DailyAttendance
+import com.gratus.bsputility.data.models.DateUtils
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
+import com.gratus.bsputility.data.models.ExternalContact
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel.SortMode
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel.EmployeeAttendanceItem
@@ -354,5 +356,138 @@ class OpenIssuesResolutionTest {
         assertEquals("Contractor 8", col1.last())
         assertEquals("Contractor 9", col2.first())
         assertEquals("Contractor 15", col2.last())
+    }
+
+    // =========================================================================
+    // Issue #35: Date Standardization, Recognition, and Sorting
+    // =========================================================================
+
+    @Test
+    fun `Issue 35 - DateUtils normalizes slash, hyphen, dot, named month, and single-digit dates to yyyy-MM-dd`() {
+        assertEquals("2026-09-15", DateUtils.normalizeDate("2026-09-15"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("2026/09/15"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("15/09/2026"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("15-09-2026"))
+        assertEquals("2026-09-05", DateUtils.normalizeDate("5/9/2026"))
+        assertEquals("2026-09-05", DateUtils.normalizeDate("2026/9/5"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("09/15/2026"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("15.09.2026"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("15/09/26"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("15-Sep-2026"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("15 Sep 2026"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("2026/09/15 10:30:00"))
+        assertEquals("2026-09-15", DateUtils.normalizeDate("15/09/2026 09:15 AM"))
+        assertEquals("2026-10-01", DateUtils.normalizeDate("", "2026-10-01"))
+    }
+
+    @Test
+    fun `Issue 35 - LATEST_JOINED and OLDEST_JOINED sort accurately even when entries mix slash and hyphen date formats`() {
+        // Previously "2026/09/01" > "2026-09-30" in raw ASCII string comparison because '/' (47) > '-' (45),
+        // and "25/08/2026" > "2026-09-15" because '25' > '20'.
+        val empAug = Employee(id = 1L, name = "Worker Aug", dateAdded = "25/08/2026")
+        val empSepEarly = Employee(id = 2L, name = "Worker Sep 1", dateAdded = "2026/09/01")
+        val empSepMid = Employee(id = 3L, name = "Worker Sep 15", dateAdded = "15-09-2026")
+        val empSepLate = Employee(id = 4L, name = "Worker Sep 30", dateAdded = "2026-09-30")
+        val empOct = Employee(id = 5L, name = "Worker Oct 5", dateAdded = "5/10/2026")
+
+        val mixedList = listOf(empSepEarly, empOct, empAug, empSepLate, empSepMid)
+
+        val latestJoined = ManpowerViewModel.sortEmployees(mixedList, SortMode.LATEST_JOINED)
+        assertEquals(
+            listOf("Worker Oct 5", "Worker Sep 30", "Worker Sep 15", "Worker Sep 1", "Worker Aug"),
+            latestJoined.map { it.name }
+        )
+
+        val oldestJoined = ManpowerViewModel.sortEmployees(mixedList, SortMode.OLDEST_JOINED)
+        assertEquals(
+            listOf("Worker Aug", "Worker Sep 1", "Worker Sep 15", "Worker Sep 30", "Worker Oct 5"),
+            oldestJoined.map { it.name }
+        )
+    }
+
+    @Test
+    fun `Issue 35 - LATEST_MODIFIED and OLDEST_MODIFIED sort by explicit modification timestamp and hide _lastModified from CSV`() {
+        val empOldJoinedButRecentlyEdited = Employee(
+            id = 1L,
+            name = "Edited Worker",
+            dateAdded = "01/08/2026",
+            customFieldsJson = DateUtils.withLastModified("""{"Blood Group":"A+"}""", 1800000000000L)
+        )
+        val empNewJoinedNeverEdited = Employee(
+            id = 2L,
+            name = "Newer Unedited Worker",
+            dateAdded = "2026-09-15",
+            customFieldsJson = "{}"
+        )
+        val empOldestNeverEdited = Employee(
+            id = 3L,
+            name = "Oldest Unedited Worker",
+            dateAdded = "10/07/2026",
+            customFieldsJson = "{}"
+        )
+
+        val list = listOf(empNewJoinedNeverEdited, empOldestNeverEdited, empOldJoinedButRecentlyEdited)
+
+        // LATEST_MODIFIED should place Edited Worker first even though their dateAdded is 01/08/2026!
+        val latestModified = ManpowerViewModel.sortEmployees(list, SortMode.LATEST_MODIFIED)
+        assertEquals(
+            listOf("Edited Worker", "Newer Unedited Worker", "Oldest Unedited Worker"),
+            latestModified.map { it.name }
+        )
+
+        val oldestModified = ManpowerViewModel.sortEmployees(list, SortMode.OLDEST_MODIFIED)
+        assertEquals(
+            listOf("Oldest Unedited Worker", "Newer Unedited Worker", "Edited Worker"),
+            oldestModified.map { it.name }
+        )
+
+        // Ensure CSV export does NOT leak _lastModified as a custom field column AND normalizes dateAdded
+        val csv = ManpowerViewModel.generateRoosterCsv(list, emptyList())
+        assertFalse("CSV should not expose internal _lastModified key", csv.contains("_lastModified"))
+        assertTrue("CSV should still export user custom fields", csv.contains("Blood Group"))
+        assertTrue("CSV should export normalized yyyy-MM-dd dates", csv.contains("\"2026-08-01\""))
+        assertTrue("CSV should export normalized yyyy-MM-dd dates", csv.contains("\"2026-07-10\""))
+    }
+
+    // =========================================================================
+    // Issue #33: External Company Contacts Tab (Catering, Water, Snacks, etc.)
+    // =========================================================================
+
+    @Test
+    fun `Issue 33 - ExternalContact serializes to and from ConfigItem with category CONTACT`() {
+        val contact = ExternalContact(
+            id = 42L,
+            name = "Annapurna Catering Service",
+            serviceCategory = "Catering Service",
+            contactPerson = "Suresh Kadam",
+            phone = "9850112233",
+            notes = "Lunch delivery at 12:30 PM"
+        )
+
+        val configItem = contact.toConfigItem()
+        assertEquals(42L, configItem.id)
+        assertEquals(ExternalContact.CATEGORY_CONTACT, configItem.category)
+        assertEquals("Annapurna Catering Service", configItem.name)
+
+        val restored = ExternalContact.fromConfigItem(configItem)
+        assertEquals(contact, restored)
+    }
+
+    @Test
+    fun `Issue 33 - ExternalContact supports legacy pipe-delimited extraType fallback`() {
+        val legacyItem = ConfigItem(
+            id = 55L,
+            category = ExternalContact.CATEGORY_CONTACT,
+            name = "Aqua Water Supplier",
+            extraType = "Water Supplier|Santosh|9764001122|20L jars"
+        )
+
+        val parsed = ExternalContact.fromConfigItem(legacyItem)
+        assertEquals(55L, parsed.id)
+        assertEquals("Aqua Water Supplier", parsed.name)
+        assertEquals("Water Supplier", parsed.serviceCategory)
+        assertEquals("Santosh", parsed.contactPerson)
+        assertEquals("9764001122", parsed.phone)
+        assertEquals("20L jars", parsed.notes)
     }
 }

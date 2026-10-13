@@ -83,7 +83,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.Contractor
 import com.gratus.bsputility.data.models.Employee
+import com.gratus.bsputility.data.models.ExternalContact
 import com.gratus.bsputility.ui.components.AddConfigDialog
+import com.gratus.bsputility.ui.components.AddContactDialog
 import com.gratus.bsputility.ui.components.AddContractorDialog
 import com.gratus.bsputility.ui.components.RestoreFullDatabaseDialog
 import com.gratus.bsputility.ui.preview.PreviewData
@@ -123,6 +125,11 @@ fun MasterDataScreen(
                 Toast.makeText(context, "Migrated $count time records to timestamps", Toast.LENGTH_LONG).show()
             }
         },
+        onNormalizeDates = {
+            viewModel.normalizeDatabaseDates { count ->
+                Toast.makeText(context, "Standardized $count date entries to YYYY-MM-DD", Toast.LENGTH_LONG).show()
+            }
+        },
         onSyncLabourDefaults = {
             viewModel.syncLabourerDefaultsFromAttendance { count ->
                 Toast.makeText(context, "Transferred defaults for $count labourers into rooster library", Toast.LENGTH_LONG).show()
@@ -140,6 +147,12 @@ fun MasterDataScreen(
         onDeleteContractor = {
             viewModel.deleteContractor(it)
             Toast.makeText(context, "Deleted ${it.name}", Toast.LENGTH_SHORT).show()
+        },
+        onAddContact = { viewModel.addExternalContact(it) },
+        onUpdateContact = { viewModel.updateExternalContact(it) },
+        onDeleteContact = {
+            viewModel.deleteExternalContact(it)
+            Toast.makeText(context, "Deleted contact ${it.name}", Toast.LENGTH_SHORT).show()
         },
         onAddConfigItem = { cat, name, type -> viewModel.addConfigItem(cat, name, type) },
         onUpdateConfigItem = { viewModel.updateConfigItem(it) },
@@ -160,6 +173,7 @@ fun MasterDataScreenContent(
     onToggle24Hour: (Boolean) -> Unit = {},
     onClearStaffContractors: () -> Unit = {},
     onMigrateTimeData: () -> Unit = {},
+    onNormalizeDates: () -> Unit = {},
     onSyncLabourDefaults: () -> Unit = {},
     onRelinkAttendanceHistory: () -> Unit = {},
     onExportFullBackup: (suspend () -> String)? = null,
@@ -167,6 +181,9 @@ fun MasterDataScreenContent(
     onAddContractor: (Contractor) -> Unit,
     onUpdateContractor: (Contractor) -> Unit,
     onDeleteContractor: (Contractor) -> Unit,
+    onAddContact: ((ExternalContact) -> Unit)? = null,
+    onUpdateContact: ((ExternalContact) -> Unit)? = null,
+    onDeleteContact: ((ExternalContact) -> Unit)? = null,
     onAddConfigItem: (category: String, name: String, fieldType: String) -> Unit,
     onUpdateConfigItem: (ConfigItem) -> Unit = {},
     onDeleteConfigItem: (ConfigItem) -> Unit,
@@ -174,11 +191,18 @@ fun MasterDataScreenContent(
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(initialTab) }
-    val tabs = listOf("Contractors", "Departments", "Designations", "Units", "Shifts", "Labour Roles", "Custom Fields", "Preferences")
+    val tabs = listOf("Contractors", "Contacts", "Departments", "Designations", "Units", "Shifts", "Labour Roles", "Custom Fields", "Preferences")
+
+    val contacts = remember(allConfigs) {
+        allConfigs.filter { it.category == ExternalContact.CATEGORY_CONTACT }
+            .map { ExternalContact.fromConfigItem(it) }
+    }
 
     // Modals
     var showAddContractorDialog by remember { mutableStateOf<Contractor?>(null) }
     var isNewContractor by remember { mutableStateOf(false) }
+    var showAddContactDialog by remember { mutableStateOf<ExternalContact?>(null) }
+    var isNewContact by remember { mutableStateOf(false) }
     var viewingContractorLaborers by remember { mutableStateOf<Contractor?>(null) }
     var showAddConfigDialog by remember { mutableStateOf(false) }
     var editingConfigItem by remember { mutableStateOf<ConfigItem?>(null) }
@@ -214,7 +238,7 @@ fun MasterDataScreenContent(
                         )
                     }
                     Text(
-                        text = "Configure contractors, plant departments, labour roles, units and custom fields",
+                        text = "Configure contractors, company contacts, plant departments, labour roles, units and custom fields",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -378,6 +402,191 @@ fun MasterDataScreenContent(
                                         onDeleteContractor(contractor)
                                     }) {
                                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (selectedTab == "Contacts") {
+                    item {
+                        Column {
+                            Text(
+                                text = "Company & Service Contacts (${contacts.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "External numbers outside of rooster (catering service, water supplier, snacks supplier, transport, etc.)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
+
+                    if (contacts.isEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "No external contacts saved yet. Tap + below to add catering services, water suppliers, snacks suppliers, or other company-relevant contacts without saving them to your phone.",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(16.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    items(contacts) { contact ->
+                        var showContactPhoneMenu by remember { mutableStateOf(false) }
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("contact_card_${contact.name}"),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = contact.name,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (contact.serviceCategory.isNotBlank()) {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = contact.serviceCategory,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (contact.contactPerson.isNotBlank() || contact.phone.isNotBlank()) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        ) {
+                                            if (contact.contactPerson.isNotBlank()) {
+                                                Text(
+                                                    text = "${contact.contactPerson} ",
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            if (contact.phone.isNotBlank()) {
+                                                Box {
+                                                    Surface(
+                                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        modifier = Modifier
+                                                            .clickable { showContactPhoneMenu = true }
+                                                            .testTag("contact_phone_${contact.phone}")
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Icon(
+                                                                Icons.Default.Phone,
+                                                                contentDescription = "Call or Copy",
+                                                                tint = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.size(11.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.width(3.dp))
+                                                            Text(
+                                                                text = contact.phone,
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Medium,
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        }
+                                                    }
+
+                                                    DropdownMenu(
+                                                        expanded = showContactPhoneMenu,
+                                                        onDismissRequest = { showContactPhoneMenu = false }
+                                                    ) {
+                                                        DropdownMenuItem(
+                                                            text = { Text("Call ${contact.phone}") },
+                                                            leadingIcon = {
+                                                                Icon(Icons.Default.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                            },
+                                                            onClick = {
+                                                                showContactPhoneMenu = false
+                                                                try {
+                                                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${contact.phone.trim()}"))
+                                                                    context.startActivity(intent)
+                                                                } catch (e: Exception) {
+                                                                    Toast.makeText(context, "Cannot open dialer: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Copy Number") },
+                                                            leadingIcon = {
+                                                                Icon(Icons.Default.ContentCopy, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                                                            },
+                                                            onClick = {
+                                                                showContactPhoneMenu = false
+                                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                                clipboard.setPrimaryClip(ClipData.newPlainText("Contact Phone", contact.phone))
+                                                                Toast.makeText(context, "Phone number copied to clipboard", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (contact.notes.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Text(
+                                            text = contact.notes,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Row {
+                                    IconButton(onClick = {
+                                        isNewContact = false
+                                        showAddContactDialog = contact
+                                    }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit Contact", tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                    IconButton(onClick = {
+                                        if (onDeleteContact != null) {
+                                            onDeleteContact(contact)
+                                        } else {
+                                            onDeleteConfigItem(contact.toConfigItem())
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Contact", tint = MaterialTheme.colorScheme.error)
                                     }
                                 }
                             }
@@ -577,6 +786,21 @@ fun MasterDataScreenContent(
                                 )
 
                                 OutlinedButton(
+                                    onClick = onNormalizeDates,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("btn_normalize_dates")
+                                ) {
+                                    Text("Standardize All Database Dates (YYYY-MM-DD)")
+                                }
+                                Text(
+                                    text = "Converts any legacy date entries with '/' or DD/MM/YYYY formats into standardized ISO YYYY-MM-DD dates for accurate sorting.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 12.dp)
+                                )
+
+                                OutlinedButton(
                                     onClick = onSyncLabourDefaults,
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -707,6 +931,15 @@ fun MasterDataScreenContent(
                         isNewContractor = true
                         showAddContractorDialog =
                             Contractor(name = "", contactPerson = "", phone = "", notes = "")
+                    } else if (selectedTab == "Contacts") {
+                        isNewContact = true
+                        showAddContactDialog = ExternalContact(
+                            name = "",
+                            serviceCategory = "Catering Service",
+                            contactPerson = "",
+                            phone = "",
+                            notes = ""
+                        )
                     } else {
                         newConfigCategory = when (selectedTab) {
                             "Departments" -> "DEPARTMENT"
@@ -742,6 +975,32 @@ fun MasterDataScreenContent(
                 if (isNewContractor) onAddContractor(toSave)
                 else onUpdateContractor(toSave)
                 showAddContractorDialog = null
+            }
+        )
+    }
+
+    // Modal: Add / Edit External Contact (Issue #33)
+    showAddContactDialog?.let { contact ->
+        AddContactDialog(
+            contact = contact,
+            isNew = isNewContact,
+            onDismiss = { showAddContactDialog = null },
+            onSave = { toSave ->
+                if (isNewContact) {
+                    if (onAddContact != null) {
+                        onAddContact(toSave)
+                    } else {
+                        val cfg = toSave.toConfigItem()
+                        onAddConfigItem(cfg.category, cfg.name, cfg.extraType)
+                    }
+                } else {
+                    if (onUpdateContact != null) {
+                        onUpdateContact(toSave)
+                    } else {
+                        onUpdateConfigItem(toSave.toConfigItem())
+                    }
+                }
+                showAddContactDialog = null
             }
         )
     }
@@ -797,6 +1056,24 @@ fun MasterDataScreenContent(
 // ==========================================
 // PREVIEWS - ALL STATES
 // ==========================================
+
+@Preview(name = "Master Data - Contacts Tab", showBackground = true)
+@Composable
+fun MasterDataScreenPreview_Contacts() {
+    MyApplicationTheme(darkTheme = false) {
+        MasterDataScreenContent(
+            contractors = PreviewData.sampleContractors,
+            allConfigs = PreviewData.sampleConfigItems,
+            allEmployees = PreviewData.sampleEmployees,
+            onAddContractor = {},
+            onUpdateContractor = {},
+            onDeleteContractor = {},
+            onAddConfigItem = { _, _, _ -> },
+            onDeleteConfigItem = {},
+            initialTab = "Contacts"
+        )
+    }
+}
 
 @Preview(name = "Master Data - Contractors Tab", showBackground = true)
 @Composable

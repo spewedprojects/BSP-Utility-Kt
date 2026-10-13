@@ -4,6 +4,7 @@ import com.gratus.bsputility.data.db.EmployeeDao
 import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.Contractor
 import com.gratus.bsputility.data.models.DailyAttendance
+import com.gratus.bsputility.data.models.DateUtils
 import com.gratus.bsputility.data.models.DepartmentVerification
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
@@ -32,15 +33,27 @@ class ManpowerRepository(private val dao: EmployeeDao) {
     }
 
     suspend fun insertEmployee(employee: Employee): Long {
-        return dao.insertEmployee(employee)
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val normalized = employee.copy(
+            dateAdded = DateUtils.normalizeDate(employee.dateAdded, todayStr)
+        )
+        return dao.insertEmployee(normalized)
     }
 
     suspend fun insertEmployees(employees: List<Employee>): List<Long> {
-        return dao.insertEmployees(employees)
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val normalized = employees.map { emp ->
+            emp.copy(dateAdded = DateUtils.normalizeDate(emp.dateAdded, todayStr))
+        }
+        return dao.insertEmployees(normalized)
     }
 
     suspend fun updateEmployee(employee: Employee) {
-        dao.updateEmployee(employee)
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val normalized = employee.copy(
+            dateAdded = DateUtils.normalizeDate(employee.dateAdded, todayStr)
+        )
+        dao.updateEmployee(normalized)
     }
 
     suspend fun deleteEmployee(employee: Employee) {
@@ -141,6 +154,49 @@ class ManpowerRepository(private val dao: EmployeeDao) {
         return updated.size
     }
 
+    suspend fun normalizeAllDatabaseDates(): Int {
+        var totalNormalized = 0
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+        val allEmps = dao.getAllEmployeesList()
+        val empsToUpdate = allEmps.mapNotNull { emp ->
+            val normDate = DateUtils.normalizeDate(emp.dateAdded, todayStr)
+            if (normDate != emp.dateAdded) {
+                emp.copy(dateAdded = normDate)
+            } else null
+        }
+        if (empsToUpdate.isNotEmpty()) {
+            dao.updateEmployees(empsToUpdate)
+            totalNormalized += empsToUpdate.size
+        }
+
+        val allAtts = dao.getAllAttendanceRecords()
+        val attsToUpdate = allAtts.mapNotNull { att ->
+            val normDate = DateUtils.normalizeDate(att.date, att.date)
+            if (normDate.isNotBlank() && normDate != att.date) {
+                att.copy(date = normDate)
+            } else null
+        }
+        if (attsToUpdate.isNotEmpty()) {
+            dao.updateDailyAttendanceBatch(attsToUpdate)
+            totalNormalized += attsToUpdate.size
+        }
+
+        val allVerifs = dao.getAllVerificationsList()
+        val verifsToUpdate = allVerifs.mapNotNull { v ->
+            val normDate = DateUtils.normalizeDate(v.date, v.date)
+            if (normDate.isNotBlank() && normDate != v.date) {
+                v.copy(date = normDate)
+            } else null
+        }
+        if (verifsToUpdate.isNotEmpty()) {
+            dao.insertVerificationsBatch(verifsToUpdate)
+            totalNormalized += verifsToUpdate.size
+        }
+
+        return totalNormalized
+    }
+
     suspend fun updateConfigItem(item: ConfigItem) {
         dao.updateConfigItem(item)
     }
@@ -194,6 +250,8 @@ class ManpowerRepository(private val dao: EmployeeDao) {
         val toInsert = mutableListOf<Employee>()
         val toUpdate = mutableListOf<Employee>()
         val matchedExistingIds = mutableSetOf<Long>()
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val nowMillis = System.currentTimeMillis()
 
         for (imported in importedEmployees) {
             val matched = (if (imported.id > 0) existingById[imported.id] else null)
@@ -204,23 +262,67 @@ class ManpowerRepository(private val dao: EmployeeDao) {
 
             if (matched != null && matched.id !in matchedExistingIds) {
                 matchedExistingIds.add(matched.id)
+                val normalizedImportedDate = if (imported.dateAdded.isNotBlank()) {
+                    DateUtils.normalizeDate(imported.dateAdded, DateUtils.normalizeDate(matched.dateAdded, todayStr))
+                } else {
+                    DateUtils.normalizeDate(matched.dateAdded, todayStr)
+                }
+                val newEmpCode = if (imported.empCode.isNotBlank()) imported.empCode.trim() else matched.empCode
+                val newStatus = if (imported.status.isNotBlank()) imported.status else matched.status
+                val newContractorId = imported.contractorId ?: matched.contractorId
+
+                val hasContentChanged = matched.name != imported.name ||
+                    matched.empCode != newEmpCode ||
+                    matched.type != imported.type ||
+                    matched.status != newStatus ||
+                    matched.permanentDepartment != imported.permanentDepartment ||
+                    matched.designation != imported.designation ||
+                    matched.contractorName != imported.contractorName ||
+                    matched.defaultWorkRole != imported.defaultWorkRole ||
+                    matched.defaultUnit != imported.defaultUnit ||
+                    matched.defaultShift != imported.defaultShift ||
+                    matched.permanentRemarks != imported.permanentRemarks
+
+                val updatedCustomFieldsJson = if (hasContentChanged) {
+                    DateUtils.withLastModified(imported.customFieldsJson, nowMillis)
+                } else {
+                    DateUtils.preserveLastModified(imported.customFieldsJson, matched.customFieldsJson)
+                }
+
                 toUpdate.add(
                     imported.copy(
                         id = matched.id,
-                        empCode = if (imported.empCode.isNotBlank()) imported.empCode.trim() else matched.empCode,
-                        dateAdded = if (imported.dateAdded.isNotBlank()) imported.dateAdded else matched.dateAdded,
-                        status = if (imported.status.isNotBlank()) imported.status else matched.status,
-                        contractorId = imported.contractorId ?: matched.contractorId
+                        empCode = newEmpCode,
+                        dateAdded = normalizedImportedDate,
+                        status = newStatus,
+                        contractorId = newContractorId,
+                        customFieldsJson = updatedCustomFieldsJson
                     )
                 )
             } else {
-                toInsert.add(imported.copy(id = 0L))
+                val normalizedDate = DateUtils.normalizeDate(imported.dateAdded, todayStr)
+                val customFieldsWithTimestamp = if (DateUtils.extractLastModifiedMillis(imported.customFieldsJson) > 0L) {
+                    imported.customFieldsJson
+                } else {
+                    DateUtils.withLastModified(imported.customFieldsJson, nowMillis)
+                }
+                toInsert.add(
+                    imported.copy(
+                        id = 0L,
+                        dateAdded = normalizedDate,
+                        customFieldsJson = customFieldsWithTimestamp
+                    )
+                )
             }
         }
 
         // Archive (soft-delete) existing workers that were omitted from incoming roster
         val toArchive = existingEmployees.filter { it.id !in matchedExistingIds && it.status != EmployeeStatuses.OUT }.map {
-            it.copy(status = EmployeeStatuses.OUT)
+            it.copy(
+                status = EmployeeStatuses.OUT,
+                dateAdded = DateUtils.normalizeDate(it.dateAdded, todayStr),
+                customFieldsJson = DateUtils.withLastModified(it.customFieldsJson, nowMillis)
+            )
         }
 
         if (toUpdate.isNotEmpty() || toArchive.isNotEmpty()) {
@@ -283,6 +385,7 @@ class ManpowerRepository(private val dao: EmployeeDao) {
         attendances: List<DailyAttendance>?,
         verifications: List<DepartmentVerification>?
     ) {
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         if (contractors != null) {
             dao.deleteAllContractors()
             dao.insertContractors(contractors)
@@ -293,15 +396,21 @@ class ManpowerRepository(private val dao: EmployeeDao) {
         }
         if (employees != null) {
             dao.deleteAllEmployees()
-            dao.insertEmployees(employees)
+            dao.insertEmployees(
+                employees.map { it.copy(dateAdded = DateUtils.normalizeDate(it.dateAdded, todayStr)) }
+            )
         }
         if (attendances != null) {
             dao.deleteAllDailyAttendance()
-            dao.insertAttendanceBatch(attendances)
+            dao.insertAttendanceBatch(
+                attendances.map { it.copy(date = DateUtils.normalizeDate(it.date, todayStr)) }
+            )
         }
         if (verifications != null) {
             dao.deleteAllDepartmentVerifications()
-            dao.insertVerificationsBatch(verifications)
+            dao.insertVerificationsBatch(
+                verifications.map { it.copy(date = DateUtils.normalizeDate(it.date, todayStr)) }
+            )
         }
         relinkAttendanceRecordsByName()
     }
@@ -368,6 +477,7 @@ class ManpowerRepository(private val dao: EmployeeDao) {
 
         val allEmployees = dao.getAllEmployeesList()
         val toUpdate = mutableListOf<Employee>()
+        val nowMillis = System.currentTimeMillis()
 
         for (emp in allEmployees) {
             if (emp.type != EmployeeTypes.STAFF) {
@@ -407,7 +517,8 @@ class ManpowerRepository(private val dao: EmployeeDao) {
                             defaultWorkRole = newRole,
                             defaultUnit = newUnit,
                             defaultShift = newShift,
-                            contractorName = newContractor
+                            contractorName = newContractor,
+                            customFieldsJson = DateUtils.withLastModified(emp.customFieldsJson, nowMillis)
                         ))
                     }
                 }

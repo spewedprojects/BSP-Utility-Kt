@@ -6,6 +6,7 @@ import com.gratus.bsputility.data.models.DepartmentVerification
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
+import com.gratus.bsputility.data.models.ExternalContact
 import com.gratus.bsputility.data.models.ManpowerSummary
 import com.gratus.bsputility.ui.viewmodel.ManpowerViewModel
 
@@ -32,6 +33,33 @@ object PreviewData {
             contactPerson = "Mahesh Jadhav",
             phone = "9765432109",
             notes = "Housekeeping & sanitation team"
+        )
+    )
+
+    val sampleContacts = listOf(
+        ExternalContact(
+            id = 29L,
+            name = "Annapurna Catering Service",
+            serviceCategory = "Catering Service",
+            contactPerson = "Suresh Kadam",
+            phone = "9850112233",
+            notes = "Daily staff & labour lunch service (12:30 PM)"
+        ),
+        ExternalContact(
+            id = 30L,
+            name = "Aqua Pure Water Supplier",
+            serviceCategory = "Water Supplier",
+            contactPerson = "Santosh Bhosale",
+            phone = "9764001122",
+            notes = "20L drinking water jars for Unit I & Unit II"
+        ),
+        ExternalContact(
+            id = 31L,
+            name = "Chakan Snacks & Tea Center",
+            serviceCategory = "Snacks / Tea Supplier",
+            contactPerson = "Nilesh More",
+            phone = "9922334455",
+            notes = "Morning & evening tea + overtime snacks"
         )
     )
 
@@ -75,7 +103,7 @@ object PreviewData {
         ConfigItem(id = 22L, category = "CUSTOM_FIELD", name = "PF Number", extraType = "TEXT|STAFF"),
         ConfigItem(id = 23L, category = "CUSTOM_FIELD", name = "Safety Shoes Issued", extraType = "BOOLEAN|LABOUR"),
         ConfigItem(id = 28L, category = "CUSTOM_FIELD", name = "Aadhaar Verified", extraType = "BOOLEAN|ALL")
-    )
+    ) + sampleContacts.map { it.toConfigItem() }
 
     val sampleEmployees = listOf(
         // Staff

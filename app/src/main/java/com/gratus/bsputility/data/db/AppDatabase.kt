@@ -9,10 +9,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.Contractor
 import com.gratus.bsputility.data.models.DailyAttendance
+import com.gratus.bsputility.data.models.DateUtils
 import com.gratus.bsputility.data.models.DepartmentVerification
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
+import com.gratus.bsputility.data.models.ExternalContact
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -85,6 +87,18 @@ abstract class AppDatabase : RoomDatabase() {
                             // Clear any existing contractor associations for Staff (Issue #6 requirement)
                             database.employeeDao().clearStaffContractorAssociations()
                             database.employeeDao().clearStaffAttendanceContractors()
+
+                            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+                            // Auto-normalize any unstandardized employee dates (Issue #35)
+                            val allEmpsForDateNorm = database.employeeDao().getAllEmployeesList()
+                            val empsToNorm = allEmpsForDateNorm.mapNotNull { emp ->
+                                val norm = DateUtils.normalizeDate(emp.dateAdded, todayStr)
+                                if (norm != emp.dateAdded) emp.copy(dateAdded = norm) else null
+                            }
+                            if (empsToNorm.isNotEmpty()) {
+                                database.employeeDao().updateEmployees(empsToNorm)
+                            }
 
                             // Auto-migrate legacy time strings to timestamps (Issue #10)
                             val unmigrated = database.employeeDao().getUnmigratedTimeRecords()
@@ -248,8 +262,32 @@ abstract class AppDatabase : RoomDatabase() {
                 dao.insertConfigItems(shifts)
                 dao.insertConfigItems(customFields)
 
-                // 2. Dummy Sample Dataset: Contractors and Employees (Visible in Debug builds only)
+                // 2. Dummy Sample Dataset: Contractors, Contacts, and Employees (Visible in Debug builds only)
                 if (com.gratus.bsputility.BuildConfig.DEBUG) {
+                    val sampleContacts = listOf(
+                        ExternalContact(
+                            name = "Annapurna Catering Service",
+                            serviceCategory = "Catering Service",
+                            contactPerson = "Suresh Kadam",
+                            phone = "9850112233",
+                            notes = "Daily staff & labour lunch service (12:30 PM)"
+                        ),
+                        ExternalContact(
+                            name = "Aqua Pure Water Supplier",
+                            serviceCategory = "Water Supplier",
+                            contactPerson = "Santosh Bhosale",
+                            phone = "9764001122",
+                            notes = "20L drinking water jars for Unit I & Unit II"
+                        ),
+                        ExternalContact(
+                            name = "Chakan Snacks & Tea Center",
+                            serviceCategory = "Snacks / Tea Supplier",
+                            contactPerson = "Nilesh More",
+                            phone = "9922334455",
+                            notes = "Morning & evening tea + overtime snacks"
+                        )
+                    ).map { it.toConfigItem() }
+                    dao.insertConfigItems(sampleContacts)
                     val c1 = Contractor(
                         name = "Apex Industrial Services",
                         contactPerson = "Suresh Shinde",

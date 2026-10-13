@@ -8,10 +8,12 @@ import com.gratus.bsputility.data.db.AppDatabase
 import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.Contractor
 import com.gratus.bsputility.data.models.DailyAttendance
+import com.gratus.bsputility.data.models.DateUtils
 import com.gratus.bsputility.data.models.DepartmentVerification
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
+import com.gratus.bsputility.data.models.ExternalContact
 import com.gratus.bsputility.data.models.ManpowerSummary
 import com.gratus.bsputility.data.repository.ManpowerRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -117,10 +119,30 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             return when (mode) {
                 SortMode.ALPHABETICAL_AZ -> employees.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
                 SortMode.ALPHABETICAL_ZA -> employees.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.name })
-                SortMode.LATEST_JOINED -> employees.sortedWith(compareByDescending<Employee> { it.dateAdded }.thenByDescending { it.id })
-                SortMode.OLDEST_JOINED -> employees.sortedWith(compareBy<Employee> { it.dateAdded }.thenBy { it.id })
-                SortMode.LATEST_MODIFIED -> employees.sortedWith(compareByDescending<Employee> { it.dateAdded }.thenByDescending { it.id })
-                SortMode.OLDEST_MODIFIED -> employees.sortedWith(compareBy<Employee> { it.dateAdded }.thenBy { it.id })
+                SortMode.LATEST_JOINED -> employees.sortedWith(
+                    compareByDescending<Employee> { DateUtils.parseDateToMillis(it.dateAdded) }
+                        .thenByDescending { it.id }
+                )
+                SortMode.OLDEST_JOINED -> employees.sortedWith(
+                    compareBy<Employee> {
+                        val millis = DateUtils.parseDateToMillis(it.dateAdded)
+                        if (millis > 0L) millis else Long.MAX_VALUE
+                    }.thenBy { it.id }
+                )
+                SortMode.LATEST_MODIFIED -> employees.sortedWith(
+                    compareByDescending<Employee> { DateUtils.getEmployeeLastModifiedMillis(it) }
+                        .thenByDescending { DateUtils.parseDateToMillis(it.dateAdded) }
+                        .thenByDescending { it.id }
+                )
+                SortMode.OLDEST_MODIFIED -> employees.sortedWith(
+                    compareBy<Employee> {
+                        val millis = DateUtils.getEmployeeLastModifiedMillis(it)
+                        if (millis > 0L) millis else Long.MAX_VALUE
+                    }.thenBy {
+                        val dMillis = DateUtils.parseDateToMillis(it.dateAdded)
+                        if (dMillis > 0L) dMillis else Long.MAX_VALUE
+                    }.thenBy { it.id }
+                )
             }
         }
 
@@ -128,10 +150,36 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             return when (mode) {
                 SortMode.ALPHABETICAL_AZ -> items.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.employee.name })
                 SortMode.ALPHABETICAL_ZA -> items.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.employee.name })
-                SortMode.LATEST_JOINED -> items.sortedWith(compareByDescending<EmployeeAttendanceItem> { it.employee.dateAdded }.thenByDescending { it.employee.id })
-                SortMode.OLDEST_JOINED -> items.sortedWith(compareBy<EmployeeAttendanceItem> { it.employee.dateAdded }.thenBy { it.employee.id })
-                SortMode.LATEST_MODIFIED -> items.sortedWith(compareByDescending<EmployeeAttendanceItem> { if (it.updatedAt > 0L) it.updatedAt else it.employee.id }.thenByDescending { it.employee.dateAdded }.thenByDescending { it.employee.id })
-                SortMode.OLDEST_MODIFIED -> items.sortedWith(compareBy<EmployeeAttendanceItem> { if (it.updatedAt > 0L) it.updatedAt else it.employee.id }.thenBy { it.employee.dateAdded }.thenBy { it.employee.id })
+                SortMode.LATEST_JOINED -> items.sortedWith(
+                    compareByDescending<EmployeeAttendanceItem> { DateUtils.parseDateToMillis(it.employee.dateAdded) }
+                        .thenByDescending { it.employee.id }
+                )
+                SortMode.OLDEST_JOINED -> items.sortedWith(
+                    compareBy<EmployeeAttendanceItem> {
+                        val millis = DateUtils.parseDateToMillis(it.employee.dateAdded)
+                        if (millis > 0L) millis else Long.MAX_VALUE
+                    }.thenBy { it.employee.id }
+                )
+                SortMode.LATEST_MODIFIED -> items.sortedWith(
+                    compareByDescending<EmployeeAttendanceItem> {
+                        maxOf(it.updatedAt, DateUtils.getEmployeeLastModifiedMillis(it.employee))
+                    }.thenByDescending {
+                        DateUtils.parseDateToMillis(it.employee.dateAdded)
+                    }.thenByDescending {
+                        it.employee.id
+                    }
+                )
+                SortMode.OLDEST_MODIFIED -> items.sortedWith(
+                    compareBy<EmployeeAttendanceItem> {
+                        val millis = maxOf(it.updatedAt, DateUtils.getEmployeeLastModifiedMillis(it.employee))
+                        if (millis > 0L) millis else Long.MAX_VALUE
+                    }.thenBy {
+                        val dMillis = DateUtils.parseDateToMillis(it.employee.dateAdded)
+                        if (dMillis > 0L) dMillis else Long.MAX_VALUE
+                    }.thenBy {
+                        it.employee.id
+                    }
+                )
             }
         }
 
@@ -142,9 +190,9 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 return "\"$escaped\""
             }
 
-            // 1. Gather all configured and populated custom field keys
+            // 1. Gather all configured and populated custom field keys (excluding internal metadata keys starting with '_')
             val customFieldConfigs = configItems
-                .filter { it.category == "CUSTOM_FIELD" }
+                .filter { it.category == "CUSTOM_FIELD" && !DateUtils.isInternalCustomFieldKey(it.name) }
                 .map { it.name }
 
             val empCustomFieldKeys = mutableSetOf<String>()
@@ -154,7 +202,10 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                         val json = JSONObject(emp.customFieldsJson)
                         val keys = json.keys()
                         while (keys.hasNext()) {
-                            empCustomFieldKeys.add(keys.next())
+                            val key = keys.next()
+                            if (!DateUtils.isInternalCustomFieldKey(key)) {
+                                empCustomFieldKeys.add(key)
+                            }
                         }
                     } catch (_: Exception) {}
                 }
@@ -187,7 +238,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 rowCols.add(escapeCsv(emp.defaultWorkRole))
                 rowCols.add(escapeCsv(emp.defaultUnit))
                 rowCols.add(escapeCsv(emp.defaultShift))
-                rowCols.add(escapeCsv(emp.dateAdded))
+                rowCols.add(escapeCsv(DateUtils.normalizeDate(emp.dateAdded, emp.dateAdded)))
                 rowCols.add(escapeCsv(emp.permanentRemarks))
 
                 allCustomFieldKeys.forEach { cfKey ->
@@ -205,6 +256,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         val db = AppDatabase.getDatabase(application)
         repository = ManpowerRepository(db.employeeDao())
         viewModelScope.launch(Dispatchers.IO) {
+            repository.normalizeAllDatabaseDates()
             repository.relinkAttendanceRecordsByName()
         }
     }
@@ -217,6 +269,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
     val allConfigItems: StateFlow<List<ConfigItem>> = repository.allConfigItems
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allContacts: StateFlow<List<ExternalContact>> = allConfigItems.map { items ->
+        items.filter { it.category == ExternalContact.CATEGORY_CONTACT }
+            .map { ExternalContact.fromConfigItem(it) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Stream of daily attendance for the currently selected date
     private val _attendanceStream = MutableStateFlow<List<DailyAttendance>>(emptyList())
@@ -791,15 +848,25 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     // --- ROOSTER (EMPLOYEE LIBRARY) ACTIONS ---
     fun addEmployee(employee: Employee) {
         viewModelScope.launch {
-            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-            val toInsert = employee.copy(dateAdded = todayStr)
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            val nowMillis = System.currentTimeMillis()
+            val toInsert = employee.copy(
+                dateAdded = DateUtils.normalizeDate(employee.dateAdded, todayStr),
+                customFieldsJson = DateUtils.withLastModified(employee.customFieldsJson, nowMillis)
+            )
             repository.insertEmployee(toInsert)
         }
     }
 
     fun updateEmployee(employee: Employee) {
         viewModelScope.launch {
-            repository.updateEmployee(employee)
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            val nowMillis = System.currentTimeMillis()
+            val toUpdate = employee.copy(
+                dateAdded = DateUtils.normalizeDate(employee.dateAdded, todayStr),
+                customFieldsJson = DateUtils.withLastModified(employee.customFieldsJson, nowMillis)
+            )
+            repository.updateEmployee(toUpdate)
         }
     }
 
@@ -836,7 +903,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
 
         if (lines.isEmpty()) return 0
 
-        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val nowMillis = System.currentTimeMillis()
         val newEmployees = lines.map { name ->
             Employee(
                 name = name,
@@ -849,7 +917,8 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 contractorName = if (targetType == EmployeeTypes.STAFF) "" else contractorName,
                 defaultWorkRole = defaultRole,
                 defaultUnit = "Unit I",
-                defaultShift = "Shift A"
+                defaultShift = "Shift A",
+                customFieldsJson = DateUtils.withLastModified("{}", nowMillis)
             )
         }
 
@@ -864,7 +933,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         val lines = csvContent.lines().map { it.trim() }.filter { it.isNotBlank() }
         if (lines.isEmpty()) return 0
 
-        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val contractorsMap = allContractors.value.associateBy { it.name.trim().lowercase() }
 
         fun parseCsvLine(line: String): List<String> {
@@ -893,15 +962,23 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             return result
         }
 
+        fun normalizeHeaderKey(raw: String): String {
+            return raw.lowercase()
+                .replace(" ", "")
+                .replace("_", "")
+                .replace("-", "")
+                .replace("/", "")
+        }
+
         val firstLineCols = parseCsvLine(lines[0])
         val hasHeader = firstLineCols.any { col ->
-            val c = col.lowercase().replace(" ", "").replace("_", "")
-            c in listOf("name", "employeename", "workername", "department", "contractor", "type", "status", "role", "designation", "employeecode", "empcode", "code", "esslid", "biometricid")
+            val c = normalizeHeaderKey(col)
+            c in listOf("name", "employeename", "workername", "department", "contractor", "type", "status", "role", "designation", "employeecode", "empcode", "code", "esslid", "biometricid", "dateadded", "joiningdate")
         }
 
         val headerIndexMap = if (hasHeader) {
             firstLineCols.mapIndexed { idx, col ->
-                col.lowercase().replace(" ", "").replace("_", "") to idx
+                normalizeHeaderKey(col) to idx
             }.toMap()
         } else emptyMap()
 
@@ -932,14 +1009,14 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
             "defaultrole", "role", "workrole", "defaultworkrole", "trade", "jobrole", "labourrole",
             "defaultunit", "unit", "plant", "workunit",
             "defaultshift", "shift", "workshift",
-            "dateadded", "date", "joiningdate", "createdat",
+            "dateadded", "date", "joiningdate", "datejoined", "doj", "dateofjoining", "addeddate", "createdat",
             "remarks", "permanentremarks", "note", "notes", "comments"
         )
 
         val customFieldColumns = if (hasHeader) {
             firstLineCols.mapIndexedNotNull { idx, originalName ->
-                val norm = originalName.lowercase().replace(" ", "").replace("_", "")
-                if (norm !in standardNormalizedKeys && originalName.isNotBlank()) {
+                val norm = normalizeHeaderKey(originalName)
+                if (norm !in standardNormalizedKeys && originalName.isNotBlank() && !DateUtils.isInternalCustomFieldKey(originalName.trim())) {
                     idx to originalName.trim()
                 } else null
             }
@@ -1035,12 +1112,13 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 if (hasHeader) 8 else (if (cols.size >= 12) 9 else (if (cols.size <= 8) 7 else 8))
             ).ifBlank { "Shift A" }
 
-            // 10. Date Added
-            val dateAdded = getColValue(
+            // 10. Date Added (normalized to standard yyyy-MM-dd regardless of '/' or '-' or dd/MM/yyyy format)
+            val rawDateAdded = getColValue(
                 cols,
-                listOf("dateadded", "date", "joiningdate", "createdat"),
+                listOf("dateadded", "date", "joiningdate", "datejoined", "doj", "dateofjoining", "addeddate", "createdat"),
                 if (cols.size >= 12) 10 else 9
-            ).ifBlank { todayStr }
+            )
+            val dateAdded = DateUtils.normalizeDate(rawDateAdded, todayStr)
 
             // 11. Remarks
             val remarks = getColValue(
@@ -1128,6 +1206,13 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun normalizeDatabaseDates(onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val count = repository.normalizeAllDatabaseDates()
+            onComplete?.invoke(count)
+        }
+    }
+
     fun relinkAttendanceRecords(onComplete: ((Int) -> Unit)? = null) {
         viewModelScope.launch {
             val count = repository.relinkAttendanceRecordsByName()
@@ -1152,7 +1237,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 put("name", emp.name)
                 put("type", emp.type)
                 put("status", emp.status)
-                put("dateAdded", emp.dateAdded)
+                put("dateAdded", DateUtils.normalizeDate(emp.dateAdded, emp.dateAdded))
                 put("permanentDepartment", emp.permanentDepartment)
                 put("designation", emp.designation)
                 if (emp.contractorId != null) put("contractorId", emp.contractorId)
@@ -1199,7 +1284,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         attendances.forEach { att ->
             val obj = JSONObject().apply {
                 put("id", att.id)
-                put("date", att.date)
+                put("date", DateUtils.normalizeDate(att.date, att.date))
                 put("employeeId", att.employeeId)
                 put("employeeCode", att.employeeCode)
                 put("employeeName", att.employeeName)
@@ -1224,7 +1309,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         verifications.forEach { v ->
             val obj = JSONObject().apply {
                 put("id", v.id)
-                put("date", v.date)
+                put("date", DateUtils.normalizeDate(v.date, v.date))
                 put("departmentName", v.departmentName)
                 put("isVerified", v.isVerified)
                 if (v.verifiedByStaffId != null) put("verifiedByStaffId", v.verifiedByStaffId)
@@ -1243,7 +1328,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     suspend fun restoreCompleteDatabaseBackupJson(jsonStr: String): Boolean = withContext(Dispatchers.IO) {
         try {
             val root = JSONObject(jsonStr)
-            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
             var contractorsList: List<Contractor>? = null
             var configItemsList: List<ConfigItem>? = null
@@ -1295,6 +1380,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 for (i in 0 until arr.length()) {
                     val obj = arr.getJSONObject(i)
                     val empType = obj.optString("type", EmployeeTypes.LABOUR)
+                    val rawDateAdded = obj.optString("dateAdded", todayStr)
                     list.add(
                         Employee(
                             id = obj.optLong("id", 0L),
@@ -1302,7 +1388,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                             name = obj.optString("name", "Unnamed"),
                             type = empType,
                             status = obj.optString("status", EmployeeStatuses.ACTIVE),
-                            dateAdded = obj.optString("dateAdded", todayStr),
+                            dateAdded = DateUtils.normalizeDate(rawDateAdded, todayStr),
                             permanentDepartment = obj.optString("permanentDepartment", "Welding Shop"),
                             designation = if (empType == EmployeeTypes.STAFF) obj.optString("designation", "") else "",
                             contractorId = if (obj.has("contractorId") && !obj.isNull("contractorId")) obj.optLong("contractorId") else null,
@@ -1324,10 +1410,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 val list = mutableListOf<DailyAttendance>()
                 for (i in 0 until arr.length()) {
                     val obj = arr.getJSONObject(i)
+                    val rawDate = obj.optString("date", todayStr)
                     list.add(
                         DailyAttendance(
                             id = obj.optLong("id", 0L),
-                            date = obj.optString("date", todayStr),
+                            date = DateUtils.normalizeDate(rawDate, todayStr),
                             employeeId = obj.optLong("employeeId", 0L),
                             employeeCode = obj.optString("employeeCode", ""),
                             employeeName = obj.optString("employeeName", ""),
@@ -1354,10 +1441,11 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 val list = mutableListOf<DepartmentVerification>()
                 for (i in 0 until arr.length()) {
                     val obj = arr.getJSONObject(i)
+                    val rawDate = obj.optString("date", todayStr)
                     list.add(
                         DepartmentVerification(
                             id = obj.optLong("id", 0L),
-                            date = obj.optString("date", todayStr),
+                            date = DateUtils.normalizeDate(rawDate, todayStr),
                             departmentName = obj.optString("departmentName", ""),
                             isVerified = obj.optBoolean("isVerified", false),
                             verifiedByStaffId = if (obj.has("verifiedByStaffId") && !obj.isNull("verifiedByStaffId")) obj.optLong("verifiedByStaffId") else null,
@@ -1400,14 +1488,16 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
                 put("name", emp.name)
                 put("type", emp.type)
                 put("status", emp.status)
-                put("dateAdded", emp.dateAdded)
+                put("dateAdded", DateUtils.normalizeDate(emp.dateAdded, emp.dateAdded))
                 put("permanentDepartment", emp.permanentDepartment)
                 put("designation", emp.designation)
+                if (emp.contractorId != null) put("contractorId", emp.contractorId)
                 put("contractorName", emp.contractorName)
                 put("defaultWorkRole", emp.defaultWorkRole)
                 put("defaultUnit", emp.defaultUnit)
                 put("defaultShift", emp.defaultShift)
                 put("permanentRemarks", emp.permanentRemarks)
+                put("customFieldsJson", emp.customFieldsJson)
             }
             employeesArray.put(obj)
         }
@@ -1429,6 +1519,7 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
         val configArray = JSONArray()
         allConfigItems.value.forEach { cfg ->
             val obj = JSONObject().apply {
+                put("id", cfg.id)
                 put("category", cfg.category)
                 put("name", cfg.name)
                 put("extraType", cfg.extraType)
@@ -1464,6 +1555,26 @@ class ManpowerViewModel(application: Application) : AndroidViewModel(application
     fun deleteContractor(contractor: Contractor) {
         viewModelScope.launch {
             repository.deleteContractor(contractor)
+        }
+    }
+
+    fun addExternalContact(contact: ExternalContact) {
+        if (contact.name.isBlank()) return
+        viewModelScope.launch {
+            repository.insertConfigItem(contact.toConfigItem())
+        }
+    }
+
+    fun updateExternalContact(contact: ExternalContact) {
+        if (contact.name.isBlank()) return
+        viewModelScope.launch {
+            repository.updateConfigItem(contact.toConfigItem())
+        }
+    }
+
+    fun deleteExternalContact(contact: ExternalContact) {
+        viewModelScope.launch {
+            repository.deleteConfigItem(contact.toConfigItem())
         }
     }
 

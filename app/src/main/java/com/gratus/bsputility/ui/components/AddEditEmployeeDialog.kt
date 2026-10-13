@@ -41,12 +41,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gratus.bsputility.data.models.ConfigItem
 import com.gratus.bsputility.data.models.Contractor
+import com.gratus.bsputility.data.models.DateUtils
 import com.gratus.bsputility.data.models.Employee
 import com.gratus.bsputility.data.models.EmployeeStatuses
 import com.gratus.bsputility.data.models.EmployeeTypes
 import com.gratus.bsputility.ui.preview.PreviewData
 import com.gratus.bsputility.ui.theme.MyApplicationTheme
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun AddEditEmployeeDialog(
@@ -63,10 +67,12 @@ fun AddEditEmployeeDialog(
     onDismiss: () -> Unit,
     onSave: (Employee) -> Unit
 ) {
+    val todayStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
     var empCode by remember { mutableStateOf(employee.empCode) }
     var name by remember { mutableStateOf(employee.name) }
     var type by remember { mutableStateOf(employee.type) }
     var status by remember { mutableStateOf(employee.status) }
+    var dateAdded by remember { mutableStateOf(DateUtils.normalizeDate(employee.dateAdded, todayStr)) }
     var department by remember { mutableStateOf(employee.permanentDepartment) }
     var designation by remember { mutableStateOf(employee.designation) }
     var contractorName by remember { mutableStateOf(employee.contractorName) }
@@ -112,7 +118,9 @@ fun AddEditEmployeeDialog(
                 val keys = json.keys()
                 while (keys.hasNext()) {
                     val k = keys.next()
-                    map[k] = json.optString(k)
+                    if (!DateUtils.isInternalCustomFieldKey(k)) {
+                        map[k] = json.optString(k)
+                    }
                 }
             }
         } catch (_: Exception) {}
@@ -362,6 +370,21 @@ fun AddEditEmployeeDialog(
                     }
                 }
 
+                // Date Joined / Added (Standardized YYYY-MM-DD)
+                val normalizedPreviewDate = remember(dateAdded) {
+                    DateUtils.normalizeDate(dateAdded, todayStr)
+                }
+                OutlinedTextField(
+                    value = dateAdded,
+                    onValueChange = { dateAdded = it },
+                    label = { Text("Date Joined / Added (YYYY-MM-DD)") },
+                    supportingText = if (dateAdded.isNotBlank() && dateAdded.trim() != normalizedPreviewDate) {
+                        { Text("Recognized as: $normalizedPreviewDate", fontSize = 11.sp) }
+                    } else null,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("input_employee_date_added")
+                )
+
                 // Permanent Remarks
                 OutlinedTextField(
                     value = remarks,
@@ -449,15 +472,20 @@ fun AddEditEmployeeDialog(
                     if (name.isNotBlank()) {
                         val jsonObj = JSONObject()
                         customFieldValues.forEach { (k, v) ->
-                            if (v.isNotBlank()) {
+                            if (!DateUtils.isInternalCustomFieldKey(k) && v.isNotBlank()) {
                                 jsonObj.put(k, v)
                             }
                         }
+                        val updatedCustomFieldsJson = DateUtils.withLastModified(
+                            jsonObj.toString(),
+                            System.currentTimeMillis()
+                        )
                         val updated = employee.copy(
                             empCode = empCode.trim(),
                             name = name.trim(),
                             type = type,
                             status = status,
+                            dateAdded = DateUtils.normalizeDate(dateAdded, todayStr),
                             permanentDepartment = (department.ifBlank { departments.firstOrNull() ?: "" }).trim(),
                             designation = if (type == EmployeeTypes.STAFF) designation.trim() else "",
                             contractorId = if (type == EmployeeTypes.STAFF) null else contractors.find { it.name.equals(contractorName, ignoreCase = true) }?.id,
@@ -466,7 +494,7 @@ fun AddEditEmployeeDialog(
                             defaultUnit = unit,
                             defaultShift = shift.ifBlank { availableShifts.firstOrNull() ?: "Shift A" },
                             permanentRemarks = remarks.trim(),
-                            customFieldsJson = jsonObj.toString()
+                            customFieldsJson = updatedCustomFieldsJson
                         )
                         onSave(updated)
                     }
